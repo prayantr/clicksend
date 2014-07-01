@@ -21,14 +21,34 @@ class Clicksend
   def recievesms
   	conn = Faraday.new(:url => 'https://api.clicksend.com')
   	conn.basic_auth 'prayantr', 'C77F81F9-CE98-13BB-B42D-BCE30A506AC4'
-  	res = conn.post '/rest/v2/reply.json', {method: 'rest', from: '', message: '', originalmessage: '', originalmessageid: '', originalsenderid: '', customstring: ''}
+  	res = conn.post '/rest/v2/reply.json'
+  	res.body
+  end
+
+  def deliverystatus
+  	conn = Faraday.new(:url => 'https://api.clicksend.com')
+  	conn.basic_auth 'prayantr', 'C77F81F9-CE98-13BB-B42D-BCE30A506AC4'	
+  	res = conn.post '/rest/v2/delivery.json'
+  	res.body
+  end
+
+  def accountbalance
+  	conn = Faraday.new(:url => 'https://api.clicksend.com')
+  	conn.basic_auth 'prayantr', 'C77F81F9-CE98-13BB-B42D-BCE30A506AC4'	
+  	res = conn.post '/rest/v2/balance.json', {method: 'rest', country: 'IN'}
   	res.body
   end
 
 end
 
 # res=Clicksend.new
-# puts res.sendsms('+19174083393', 'hello bhai', '', '', '', '', '')
+# puts res.sendsms('+19174083393', 'bhai', '', '', '', '', '')
 
-res=Clicksend.new
-puts res.recievesms
+# res=Clicksend.new
+# puts res.recievesms
+
+# res=Clicksend.new
+# puts res.deliverystatus
+
+# res=Clicksend.new
+# puts res.accountbalance
