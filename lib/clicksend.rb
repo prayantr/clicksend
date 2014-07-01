@@ -18,7 +18,17 @@ class Clicksend
    	end
   end
 
+  def recievesms
+  	conn = Faraday.new(:url => 'https://api.clicksend.com')
+  	conn.basic_auth 'prayantr', 'C77F81F9-CE98-13BB-B42D-BCE30A506AC4'
+  	res = conn.post '/rest/v2/reply.json', {method: 'rest', from: '', message: '', originalmessage: '', originalmessageid: '', originalsenderid: '', customstring: ''}
+  	res.body
+  end
+
 end
 
+# res=Clicksend.new
+# puts res.sendsms('+19174083393', 'hello bhai', '', '', '', '', '')
+
 res=Clicksend.new
-puts res.sendsms('+19174083393', 'hello bhai', '', '', '', '', '')
+puts res.recievesms
