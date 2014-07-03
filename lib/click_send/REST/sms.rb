@@ -1,6 +1,7 @@
 module ClickSend
   module REST
     class Sms
+      include Response
       
       attr_accessor :client
       
@@ -17,12 +18,12 @@ module ClickSend
         params.merge!(method: 'rest')
         
         response = @client.post '/rest/v2/send.json', params
-        MultiJson.load(response.body)
+        parse_response(response)
       end
 
       def receive
         response = @client.post '/rest/v2/reply.json'
-        MultiJson.load(response.body)
+        parse_response(response)
       end
 
     end

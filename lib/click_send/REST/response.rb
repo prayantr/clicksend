@@ -17,8 +17,7 @@ module ClickSend
       }
       
       def parse_response(response)
-        JSON.parse(response)
-        
+        MultiJson.load(response.body)        
       end
     end
   end

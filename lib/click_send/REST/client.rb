@@ -24,9 +24,9 @@ module ClickSend
         @delivery_report.all
       end
       
-      def account_balance
+      def account_balance(opts={})
         @account_balance = ClickSend::REST::AccountBalance.new(@connection)
-        @account_balance.get        
+        @account_balance.get(opts)
       end
     end
   end

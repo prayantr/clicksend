@@ -1,6 +1,7 @@
 module ClickSend
   module REST
     class DeliveryReport
+      include Response
       
       attr_accessor :client
       
@@ -10,7 +11,7 @@ module ClickSend
             
       def all
         response = @client.post '/rest/v2/delivery.json'
-        MultiJson.load(response.body)
+        parse_response(response)
       end
 
     end

@@ -1,6 +1,7 @@
 module ClickSend
   module REST
-    class AccountBalance
+    class AccountBalance      
+      include Response
       
       attr_accessor :client
       
@@ -12,7 +13,7 @@ module ClickSend
         params = {method: 'rest'}
         params.merge!(country: opts[:country]) if opts[:country]
         response = @client.post '/rest/v2/balance.json', params
-        MultiJson.load(response.body)
+        parse_response(response)
       end
     end
   end
