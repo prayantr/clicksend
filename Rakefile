@@ -2,6 +2,7 @@
 
 require "rubygems"
 require "hoe"
+require "./lib/click_send/version"
 
 # Hoe.plugin :compiler
 # Hoe.plugin :gem_prelude_sucks
@@ -12,13 +13,13 @@ require "hoe"
 Hoe.plugin :gemspec
 
 Hoe.spec "clicksend" do
-  # HEY! If you fill these out in ~/.hoe_template/default/Rakefile.erb then
-  # you'll never have to touch them again!
-  # (delete this comment too, of course)
-
+  developer("Amit Solanki", "amit@prayantr.com")
   developer("Braj Pratap Singh", "braj@prayantr.com")
 
-  # license "MIT" # this should match the license in the README
+  self.name = "clicksend"
+  self.version = "0.0.1"
+  self.urls = ["http://github.com/prayantr/clicksend"]
+  license "MIT" # this should match the license in the README
 end
 
 # vim: syntax=ruby
