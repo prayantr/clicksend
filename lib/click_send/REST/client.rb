@@ -1,6 +1,6 @@
 module ClickSend
   module REST
-    class Client
+    class Client      
       attr_reader :connection, :site_url, :messages
       
       attr_accessor :username, :api_key
@@ -26,7 +26,11 @@ module ClickSend
       
       def account_balance(opts={})
         @account_balance = ClickSend::REST::AccountBalance.new(@connection)
-        @account_balance.get(opts)
+        @account_balance.all(opts)
+      end
+      
+      def inspect
+        "#<ClickSend::REST::Client:0x007fc3eb08df48 @api_key=#{@api_key}, @username=#{@username}, @host=#{@host}, @site_url=#{@site_url}"
       end
     end
   end

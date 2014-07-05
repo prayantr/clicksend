@@ -1,14 +1,7 @@
 module ClickSend
   module REST
-    class Sms
-      include Response
+    class Sms < Resource
       
-      attr_accessor :client
-      
-      def initialize(client)
-        @client = client
-      end
-            
       def send(params={})
         params.reject!{|key, value| ![:to, :message, :senderid, :schedule, :customstring, :return, :messagetype].include?(key)}
         
@@ -17,13 +10,11 @@ module ClickSend
         
         params.merge!(method: 'rest')
         
-        response = @client.post '/rest/v2/send.json', params
-        parse_response(response)
+        perform_request(:post, '/rest/v2/send.json', params)
       end
 
       def receive
-        response = @client.post '/rest/v2/reply.json'
-        parse_response(response)
+        perform_request(:post, '/rest/v2/reply.json')
       end
 
     end

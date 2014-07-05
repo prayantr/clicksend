@@ -1,19 +1,11 @@
 module ClickSend
   module REST
-    class DeliveryReport
-      include Response
+    class DeliveryReport < Resource
       
-      attr_accessor :client
-      
-      def initialize(client)
-        @client = client
-      end
-            
       def all
-        response = @client.post '/rest/v2/delivery.json'
-        parse_response(response)
+        perform_request(:post, '/rest/v2/delivery.json')
       end
-
+      
     end
   end
 end

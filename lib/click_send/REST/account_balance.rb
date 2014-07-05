@@ -1,20 +1,13 @@
 module ClickSend
   module REST
-    class AccountBalance      
-      include Response
+    class AccountBalance < Resource
       
-      attr_accessor :client
-      
-      def initialize(client)
-        @client = client
-      end
-            
-      def get(opts={})
+      def all(opts={})
         params = {method: 'rest'}
         params.merge!(country: opts[:country]) if opts[:country]
-        response = @client.post '/rest/v2/balance.json', params
-        parse_response(response)
+        perform_request(:post, '/rest/v2/balance.json', params)
       end
+      
     end
   end
 end
