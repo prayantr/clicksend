@@ -1,6 +1,6 @@
 module ClickSend
   module REST
-    class Client      
+    class Client
       attr_reader :connection, :site_url, :messages
       
       attr_accessor :username, :api_key

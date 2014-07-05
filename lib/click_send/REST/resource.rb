@@ -27,21 +27,29 @@ module ClickSend
       end
       
       def perform_request(method, url, params={})
-        response = case method
-        when :get
-          get(url)
-        when :post
-          post(url, params)
-        when :put
-          post(url, params)
-        when :delete
-          delete(url)
+        begin
+          response = case method
+          when :get
+            get(url)
+          when :post
+            post(url, params)
+          when :put
+            post(url, params)
+          when :delete
+            delete(url)
+          end
+          parse_response(response)
+        rescue Exception => e
+          raise ClickSendError, e.message
         end
-        parse_response(response)
       end
       
       def parse_response(response)
-        body = MultiJson.load(response.body)
+        begin
+          body = MultiJson.load(response.body)
+        rescue Exception => e
+          raise ClickSendError, e.message
+        end
       end
     end
   end
