@@ -27,7 +27,7 @@ Gem::Specification.new do |s|
     "lib/click_send/REST/account_balance.rb",
     "lib/click_send/REST/client.rb",
     "lib/click_send/REST/delivery_report.rb",
-    "lib/click_send/REST/response.rb",
+    "lib/click_send/REST/resource.rb",
     "lib/click_send/REST/sms.rb",    
     "test/test_clicksend.rb", 
   ]
