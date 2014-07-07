@@ -46,17 +46,23 @@ Gem::Specification.new do |s|
       s.add_development_dependency(%q<hoe>, ["~> 3.12"])
       s.add_development_dependency(%q<muti_json>, ["~> 1.10"])
       s.add_development_dependency(%q<faraday>, ["~> 0.9"])
+      s.add_development_dependency(%q<rspec>, ["~> 3.0"])
+      s.add_development_dependency(%q<webmock>, ["~> 1.18"])
     else
       s.add_dependency(%q<rdoc>, ["~> 4.0"])
       s.add_dependency(%q<hoe>, ["~> 3.12"])
       s.add_development_dependency(%q<muti_json>, ["~> 1.10"])
       s.add_development_dependency(%q<faraday>, ["~> 0.9"])
+      s.add_development_dependency(%q<rspec>, ["~> 3.0"])
+      s.add_development_dependency(%q<webmock>, ["~> 1.18"])
     end
   else
     s.add_dependency(%q<rdoc>, ["~> 4.0"])
     s.add_dependency(%q<hoe>, ["~> 3.12"])
     s.add_dependency(%q<muti_json>, ["~> 1.10"])
     s.add_dependency(%q<faraday>, ["~> 0.9"])
+    s.add_development_dependency(%q<rspec>, ["~> 3.0"])
+    s.add_development_dependency(%q<webmock>, ["~> 1.18"])
   end
 
 end
