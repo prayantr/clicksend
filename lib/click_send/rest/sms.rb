@@ -4,9 +4,8 @@ module ClickSend
       
       def send(params={})
         params.reject!{|key, value| ![:to, :message, :senderid, :schedule, :customstring, :return, :messagetype].include?(key)}
-        
-        raise 'Recipient Mobile Number should be provided' if params[:to].empty?
-        raise 'Message content should not be empty' if params[:message].empty?
+        raise ClickSendError, 'Recipient Mobile Number is mandatory' if params[:to].nil? || params[:to].empty?
+        raise ClickSendError, 'Message is mandatory' if params[:message].nil? || params[:message].empty?
         
         params.merge!(method: 'rest')
         

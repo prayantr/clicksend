@@ -8,7 +8,7 @@ module ClickSend
         @client = client
       end      
             
-      private
+      #private
       
       def get(url)
         @client.get(url, params)
@@ -46,6 +46,7 @@ module ClickSend
       
       def parse_response(response)
         begin
+          puts response.inspect
           body = MultiJson.load(response.body)
         rescue Exception => e
           raise ClickSendError, e.message
