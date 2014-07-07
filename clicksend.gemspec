@@ -24,11 +24,11 @@ Gem::Specification.new do |s|
     "lib/clicksend.rb", 
     "lib/click_send.rb",
     "lib/click_send/version.rb",    
-    "lib/click_send/REST/account_balance.rb",
-    "lib/click_send/REST/client.rb",
-    "lib/click_send/REST/delivery_report.rb",
-    "lib/click_send/REST/resource.rb",
-    "lib/click_send/REST/sms.rb",    
+    "lib/click_send/rest/account_balance.rb",
+    "lib/click_send/rest/client.rb",
+    "lib/click_send/rest/delivery_report.rb",
+    "lib/click_send/rest/resource.rb",
+    "lib/click_send/rest/sms.rb",    
     "test/test_clicksend.rb", 
   ]
   s.homepage = "http://github.com/prayantr/clicksend"
