@@ -11,7 +11,7 @@ module ClickSend
       private
       
       def get(url)
-        @client.get(url, params)
+        raise "To be Implemented"
       end
       
       def post(url, params)
@@ -19,7 +19,7 @@ module ClickSend
       end
       
       def put(url, params)
-        @client.put(url, params)
+        raise "To be Implemented"
       end
       
       def delete(url)
