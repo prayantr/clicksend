@@ -34,7 +34,7 @@ module ClickSend
           when :post
             post(url, params)
           when :put
-            post(url, params)
+            put(url, params)
           when :delete
             delete(url)
           end
