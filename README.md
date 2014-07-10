@@ -1,2 +1,1 @@
-ClickSend Changelog
-=====================
+# ClickSend
