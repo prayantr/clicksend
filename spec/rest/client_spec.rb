@@ -11,6 +11,15 @@ describe ClickSend::REST::Client do
     expect { @client.account_balance }.to raise_error(ClickSend::ClickSendError)
   end
 
+  it 'should raise an error if API end point does not respond' do
+    stub_request(:post, "https://user:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx@api.clicksend.com/rest/v2/delivery.json").to_raise(TimeoutError)    
+    expect { @client.delivery_report }.to raise_error(ClickSend::ClickSendError)
+  end
+
+  it 'should not raise error on inspecting client object' do
+    expect {@client.inspect}.not_to raise_error
+  end
+
   it 'should set up a new client instance with the given sid and token' do
     expect(@client.username).to eq('user')
     expect(@client.api_key).to eq('xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx')
