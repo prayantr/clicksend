@@ -16,7 +16,6 @@ module ClickSend
         @connection = Faraday.new(:url => @site_url)
         @connection.basic_auth username, api_key
         @messages = ClickSend::REST::Sms.new(@connection)
-        @connection
       end
 
       def delivery_report

@@ -13,12 +13,12 @@ Gem::Specification.new do |s|
   s.description = "Rubygem to interact with ClickSend api"
   s.email = ["amit@prayantr.com", "braj@prayantr.com"]
   s.executables = ["clicksend"]
-  s.extra_rdoc_files = ["History.txt", "Manifest.txt", "README.txt"]
+  s.extra_rdoc_files = ["History.txt", "Manifest.txt", "README.md"]
   s.files = [
     ".autotest", 
     "History.txt", 
     "Manifest.txt", 
-    "README.txt", 
+    "README.md", 
     "Rakefile", 
     "bin/clicksend", 
     "lib/clicksend.rb", 
@@ -33,7 +33,7 @@ Gem::Specification.new do |s|
   ]
   s.homepage = "http://github.com/prayantr/clicksend"
   s.licenses = ["MIT"]
-  s.rdoc_options = ["--main", "README.txt"]
+  s.rdoc_options = ["--main", "README.md"]
   s.rubygems_version = "2.2.2"
   s.summary = "Rubygem to interact with ClickSend RESTful api to send sms via clicksend.com"
   s.test_files = ["test/test_clicksend.rb"]
@@ -48,7 +48,7 @@ Gem::Specification.new do |s|
       s.add_development_dependency(%q<faraday>, ["~> 0.9"])
       s.add_development_dependency(%q<rspec>, ["~> 3.0"])
       s.add_development_dependency(%q<webmock>, ["~> 1.18"])
-      s.add_development_dependency(%q<simplecov>, ["~> 0.7.1"])
+      s.add_development_dependency(%q<simplecov>, ["~> 0.8"])
     else
       s.add_dependency(%q<rdoc>, ["~> 4.0"])
       s.add_dependency(%q<hoe>, ["~> 3.12"])
@@ -56,7 +56,7 @@ Gem::Specification.new do |s|
       s.add_development_dependency(%q<faraday>, ["~> 0.9"])
       s.add_development_dependency(%q<rspec>, ["~> 3.0"])
       s.add_development_dependency(%q<webmock>, ["~> 1.18"])
-      s.add_development_dependency(%q<simplecov>, ["~> 0.7.1"])
+      s.add_development_dependency(%q<simplecov>, ["~> 0.8"])
     end
   else
     s.add_dependency(%q<rdoc>, ["~> 4.0"])
@@ -65,7 +65,7 @@ Gem::Specification.new do |s|
     s.add_dependency(%q<faraday>, ["~> 0.9"])
     s.add_development(%q<rspec>, ["~> 3.0"])
     s.add_development(%q<webmock>, ["~> 1.18"])
-    s.add_development(%q<simplecov>, ["~> 0.7.1"])
+    s.add_development(%q<simplecov>, ["~> 0.8"])
   end
 
 end

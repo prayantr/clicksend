@@ -2,10 +2,10 @@ module ClickSend
   module REST
     class Resource
       
-      attr_accessor :client
+      attr_accessor :connection
       
-      def initialize(client)
-        @client = client
+      def initialize(connection)
+        @connection = connection
       end      
             
       private
@@ -15,7 +15,7 @@ module ClickSend
       end
       
       def post(url, params)
-        @client.post(url, params)
+        @connection.post(url, params)
       end
       
       def put(url, params)
