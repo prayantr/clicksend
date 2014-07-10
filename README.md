@@ -19,16 +19,14 @@ As a Gem from gemcutter
 
 ## Usage
 
-You will require an account with http://inteltech.com.au for the username and secret key - They offer a free trial so you can try before buying.
-
-Note: Inteltech's gateway assumes numbers not in international format (ie starting with a plus sign) are australian numbers.
+You will require an account with https://my.clicksend.com for the username and secret key - They offer a free trial so you can try before buying.
 
 Example ruby code:
 
 ```
 require 'rubygems'
 
-require 'inteltech_sms'
+require 'clicksend'
 
 username = ENV['SMS_USERNAME'] || abort("Missing SMS_USERNAME env variable")
 secure_key = ENV['SMS_KEY'] || abort("Missing SMS_KEY env variable")
