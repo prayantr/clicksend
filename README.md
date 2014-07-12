@@ -4,7 +4,7 @@ ClickSend is a ruby gem that provides a clicksend class to check credit and send
 
 ## Installation
 
-To install using [Bundler][bundler] grab the latest stable version:
+To install using Bundler grab the latest stable version:
 
 ```
 gem 'clicksend', '~> 0.0.1'
