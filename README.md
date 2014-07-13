@@ -77,6 +77,33 @@ api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'  # Your Secure Unique API key.
 :messagetype => ''
 ```
 
+### Receive
+
+```
+@receiver = @client.messages
+@receiver.receive
+```
+
+### Delivery Reports
+
+```
+@client.delivery_report
+```
+
+### Account Balance
+
+```
+@client.account_balance
+
+# optional parameter
+
+# A 2-letter country code (ISO 3166-1 Alpha-2 code).
+:country => ''
+# e.g. "AU" = Australia.
+# If provided, the response will show the account balance and the number of SMS messages you can send to the country specified (credit).
+# If the country isn't provided, the response will only show the account balance.
+```
+
 ## Copyright
 
 Copyright (c) 2014 https://prayantr.com - MIT License. See LICENSE.txt for further details.
