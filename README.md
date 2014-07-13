@@ -57,14 +57,12 @@ api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'  # Your Secure Unique API key.
 
 #custom sender ID:
 :senderid => ''
-
 #-Alphanumeric e.g. "MyCompany". 11 characters max. No spaces. The recipient will not be able to reply to the message.
 #-Numeric e.g. +61411111111. You can enter your own mobile number in international format to make messages appear to come from your mobile number. Replies will be sent directly to your mobile.
 #-Leave blank for two-way SMS. Replies will be directed back to the original sender.
 
 # Allows you to schedule message delivery. Must be in unix format.
 :schedule => ''
-
 # For example: 1348742950. 
 # Leave blank for instant delivery.
 
