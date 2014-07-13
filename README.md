@@ -36,11 +36,15 @@ require 'rubygems' # not necessary with ruby 1.9 but included for completeness
 require 'clicksend'
 
 # put your own credentials here
-username = 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
+username = 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'      # Your ClickSend username.
+api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'  # Your Secure Unique API key.
 
 # set up a client to talk to the ClickSend REST API
 @client = ClickSend::REST::Client.new(:username => username, :api_key => api_key)
+
+# secure socket layer is enable
+# set false to disable secure socket layer 
+@client = ClickSend::REST::Client.new(:username => username, :api_key => api_key, :use_ssl => false)
 ```
 
 ### Send an SMS
@@ -48,6 +52,31 @@ api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
 ```
 @sender = @client.messages
 @sender.send(:to => '+919999999999', :message => 'hello world')
+
+#optional parameters
+
+#custom sender ID:
+:senderid => ''
+
+#-Alphanumeric e.g. "MyCompany". 11 characters max. No spaces. The recipient will not be able to reply to the message.
+#-Numeric e.g. +61411111111. You can enter your own mobile number in international format to make messages appear to come from your mobile number. Replies will be sent directly to your mobile.
+#-Leave blank for two-way SMS. Replies will be directed back to the original sender.
+
+# Allows you to schedule message delivery. Must be in unix format.
+:schedule => ''
+
+# For example: 1348742950. 
+# Leave blank for instant delivery.
+
+# A custom string that will be passed back with replies and delivery reports. Maximum 50      characters.
+:customstring => ''
+
+# Redirect to a URL after delivering the message(s).
+:return => ''
+
+# For non-English characters use messagetype=Unicode.
+# Leave blank for a standard English message.
+:messagetype => ''
 ```
 
 ## Copyright

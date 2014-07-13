@@ -1,4 +1,3 @@
-.autotest
 History.txt
 Manifest.txt
 README.md
@@ -12,4 +11,3 @@ lib/click_send/rest/client.rb
 lib/click_send/rest/delivery_report.rb
 lib/click_send/rest/resource.rb
 lib/click_send/rest/sms.rb
-test/test_clicksend.rb

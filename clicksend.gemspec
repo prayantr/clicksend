@@ -14,8 +14,7 @@ Gem::Specification.new do |s|
   s.email = ["amit@prayantr.com", "braj@prayantr.com"]
   s.executables = ["clicksend"]
   s.extra_rdoc_files = ["History.txt", "Manifest.txt", "README.md"]
-  s.files = [
-    ".autotest", 
+  s.files = [ 
     "History.txt", 
     "Manifest.txt", 
     "README.md", 
@@ -28,15 +27,14 @@ Gem::Specification.new do |s|
     "lib/click_send/rest/client.rb",
     "lib/click_send/rest/delivery_report.rb",
     "lib/click_send/rest/resource.rb",
-    "lib/click_send/rest/sms.rb",    
-    "test/test_clicksend.rb", 
+    "lib/click_send/rest/sms.rb",     
   ]
   s.homepage = "http://github.com/prayantr/clicksend"
   s.licenses = ["MIT"]
   s.rdoc_options = ["--main", "README.md"]
   s.rubygems_version = "2.2.2"
   s.summary = "Rubygem to interact with ClickSend RESTful api to send sms via clicksend.com"
-  s.test_files = ["test/test_clicksend.rb"]
+  s.test_files = Dir['spec/**/*.rb']
 
   if s.respond_to? :specification_version then
     s.specification_version = 4
