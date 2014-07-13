@@ -1,9 +1,14 @@
 module ClickSend
   module REST
+    ##
+    # A base class to wrap all basic methods to interact with ClickSend API.
+    # All other resource classes within this library inherit from this class.
     class Resource
       
       attr_accessor :connection
-      
+
+      ##
+      # Instantiate a new resource object.
       def initialize(connection)
         @connection = connection
       end      
@@ -26,6 +31,10 @@ module ClickSend
         raise "To be Implemented"
       end
       
+      ##
+      # Define #get, #post, #put and #delete helper methods for sending HTTP
+      # requests to ClickSend. Each method returns a hash obtained from parsing 
+      # the JSON object in the response body.
       def perform_request(method, url, params={})
         begin
           response = case method
@@ -44,6 +53,9 @@ module ClickSend
         end
       end
       
+      ##
+      # Parse JSON object returned from ClickSend API and raise error if response
+      # fails or is not as expected.
       def parse_response(response)
         begin
           body = MultiJson.load(response.body)

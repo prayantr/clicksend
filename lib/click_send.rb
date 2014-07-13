@@ -6,5 +6,5 @@ require 'click_send/rest/sms'
 require 'click_send/rest/client'
 
 module ClickSend
-  class ClickSendError < StandardError; end
+  class ClickSendError < StandardError; end  # :nodoc:
 end
