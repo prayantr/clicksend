@@ -42,6 +42,8 @@ api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'  # Your Secure Unique API key.
 
 ### Send an SMS
 
+Send SMS message from given number.
+
 ```
 @client.messages.send(:to => '+919999999999', :message => 'hello world')
 ```
