@@ -60,10 +60,7 @@ api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'  # Your Secure Unique API key.
 | --------- | -------- | ---- | ----------- |
 | to        | Yes      | String | Recipient Mobile Number in international format (with leading + and country code). Separate multiple recipients with a comma (,) where applicable. Maximum 1000 recipients. For example: +614XXXXXXXX (Australia), +1XXXXXXXXXX (US), +65XXXXXXXXX (Singapore), +44XXXXXXXXXX (UK) |
 | message   | Yes      | String | The message to be sent. Maximum 960 characters. |
-| senderid  | No       | String | custom sender ID:<br />
--Alphanumeric e.g. "MyCompany". 11 characters max. No spaces. The recipient will not be able to reply to the message.<br />
--Numeric e.g. +61411111111. You can enter your own mobile number in international format to make messages appear to come from your mobile number. Replies will be sent directly to your mobile.<br />
--Leave blank for two-way SMS. Replies will be directed back to the original sender. |
+| senderid  | No       | String | custom sender ID:<br>-Alphanumeric e.g. "MyCompany". 11 characters max. No spaces. The recipient will not be able to reply to the message.<br>-Numeric e.g. +61411111111. You can enter your own mobile number in international format to make messages appear to come from your mobile number. Replies will be sent directly to your mobile.<br>-Leave blank for two-way SMS. Replies will be directed back to the original sender. |
 
 <!-- #custom sender ID:
 :senderid => ''
