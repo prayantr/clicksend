@@ -10,13 +10,6 @@ To install using [Bundler][bundler] grab the latest stable version:
 gem 'clicksend', '~> 0.0.1'
 ```
 
-As a Plugin (eg rails 2.3.x)
-
-```
-% cd vendor/plugins
-% git clone git://github.com/prayantr/clicksend
-```
-
 As a Gem from gemcutter
 
 ```
@@ -50,8 +43,7 @@ api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'  # Your Secure Unique API key.
 ### Send an SMS
 
 ```
-@sender = @client.messages
-@sender.send(:to => '+919999999999', :message => 'hello world')
+@client.messages.send(:to => '+919999999999', :message => 'hello world')
 ```
 
 #### Parameters
@@ -66,32 +58,11 @@ api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'  # Your Secure Unique API key.
 | return | No | String | Redirect to a URL after delivering the message(s). |
 | messagetype | No | String | For non-English characters use messagetype=Unicode.<br>Leave blank for a standard English message. |
 
-<!-- #custom sender ID:
-:senderid => ''
-#-Alphanumeric e.g. "MyCompany". 11 characters max. No spaces. The recipient will not be able to reply to the message.
-#-Numeric e.g. +61411111111. You can enter your own mobile number in international format to make messages appear to come from your mobile number. Replies will be sent directly to your mobile.
-#-Leave blank for two-way SMS. Replies will be directed back to the original sender.
-
-# Allows you to schedule message delivery. Must be in unix format.
-:schedule => ''
-# For example: 1348742950. 
-# Leave blank for instant delivery.
-
-# A custom string that will be passed back with replies and delivery reports. Maximum 50      characters.
-:customstring => ''
-
-# Redirect to a URL after delivering the message(s).
-:return => ''
-
-# For non-English characters use messagetype=Unicode.
-# Leave blank for a standard English message.
-:messagetype => '' -->
 
 ### Receive
 
 ```
-@receiver = @client.messages
-@receiver.receive
+@client.messages.receive
 ```
 
 ### Delivery Reports
@@ -104,15 +75,13 @@ api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'  # Your Secure Unique API key.
 
 ```
 @client.account_balance
-
-# optional parameter
-
-# A 2-letter country code (ISO 3166-1 Alpha-2 code).
-:country => ''
-# e.g. "AU" = Australia.
-# If provided, the response will show the account balance and the number of SMS messages you can send to the country specified (credit).
-# If the country isn't provided, the response will only show the account balance.
 ```
+
+#### Parameters
+
+| Parameter | Required | Type | Description |
+| --------- | -------- | ---- | ----------- |
+| country   | No       | String | A 2-letter country code (ISO 3166-1 Alpha-2 code).<br>e.g. "AU" = Australia.<br>If provided, the response will show the account balance and the number of SMS messages you can send to the country specified (credit).<br>If the country isn't provided, the response will only show the account balance. |
 
 ## Copyright
 
