@@ -58,7 +58,7 @@ api_key = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'  # Your Secure Unique API key.
 
 | Parameter | Optional | Type | Description |
 | --------- | -------- | ---- | ----------- |
-|to         | No       | String | Recipient Mobile Number in international format (with leading + and country code). Separate multiple recipients with a comma (,) where applicable. Maximum 1000 recipients. |
+|to         | No       | String | Recipient Mobile Number in international format (with leading + and country code). Separate multiple recipients with a comma (,) where applicable. Maximum 1000 recipients. For example: +614XXXXXXXX (Australia), +1XXXXXXXXXX (US), +65XXXXXXXXX (Singapore), +44XXXXXXXXXX (UK) |
 
 <!-- #custom sender ID:
 :senderid => ''
