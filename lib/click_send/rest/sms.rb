@@ -61,10 +61,10 @@ module ClickSend
       #
       # Leave blank for a standard English message.
       def send(params={})
-        params[:schedule]=params[:schedule].to_i if !params[:schedule].nil? || !params[:schedule].empty?
         params.reject!{|key, value| ![:to, :message, :senderid, :schedule, :customstring, :return, :messagetype].include?(key)}
         raise ClickSendError, 'Recipient Mobile Number is mandatory' if params[:to].nil? || params[:to].empty?
         raise ClickSendError, 'Message is mandatory' if params[:message].nil? || params[:message].empty?
+        params[:schedule]=params[:schedule].to_i if !(params[:schedule].nil?)
         
         params.merge!(method: 'rest')
         
