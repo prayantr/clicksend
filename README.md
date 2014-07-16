@@ -60,8 +60,22 @@ Send SMS message from given number.
 | return | No | String | Redirect to a URL after delivering the message(s). |
 | messagetype | No | String | For non-English characters use messagetype=Unicode.<br>Leave blank for a standard English message. |
 
+#### Example
+
+```
+# replies will be sent directly to given senderid
+@client.messages.send(:to => '+919999999999', :message => 'hello world', :senderid => '+918888888888')
+```
+
+```
+# message will be sent on given schedule
+@client.messages.send(:to => '+919999999999', :message => 'hello world', :schedule => '1348742950')
+```
+
 
 ### Receive
+
+Poll ClickSend API for replies to messages. Make sure 'Poll our server' settings is selected under 'SMS Reply Report Settings' before using this.
 
 ```
 @client.messages.receive
@@ -69,11 +83,15 @@ Send SMS message from given number.
 
 ### Delivery Reports
 
+Direct method to get delivery reports for sent messages using ClickSend API.
+
 ```
 @client.delivery_report
 ```
 
 ### Account Balance
+
+Direct method to get account balance using ClickSend API.
 
 ```
 @client.account_balance
@@ -84,6 +102,13 @@ Send SMS message from given number.
 | Parameter | Required | Type | Description |
 | --------- | -------- | ---- | ----------- |
 | country   | No       | String | A 2-letter country code (ISO 3166-1 Alpha-2 code).<br>e.g. "AU" = Australia.<br>If provided, the response will show the account balance and the number of SMS messages you can send to the country specified (credit).<br>If the country isn't provided, the response will only show the account balance. |
+
+#### Example
+
+```
+# This will show the account balance and the number of SMS messages you can send to the country specified
+@client.account_balance('IN')
+```
 
 ## Copyright
 
