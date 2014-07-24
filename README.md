@@ -68,8 +68,8 @@ Send SMS message from given number.
 ```
 
 ```
-# message will be sent on given schedule
-@client.messages.send(:to => '+919999999999', :message => 'hello world', :schedule => '1348742950')
+# Deliver message 5 minutes from now
+@client.messages.send(:to => '+919999999999', :message => 'hello world', :schedule => Time.now + 300)
 ```
 
 
