@@ -1,25 +1,24 @@
-# -*- ruby -*-
+# frozen_string_literal: true
 
-require "rubygems"
-require "hoe"
-require "./lib/click_send/version"
+require "bundler/gem_tasks"
+require "rspec/core/rake_task"
+require "standard/rake"
 
-# Hoe.plugin :compiler
-# Hoe.plugin :gem_prelude_sucks
-# Hoe.plugin :inline
-# Hoe.plugin :racc
-# Hoe.plugin :rcov
-# Hoe.plugin :rdoc
-Hoe.plugin :gemspec
+RSpec::Core::RakeTask.new(:spec)
 
-Hoe.spec "clicksend" do
-  developer("Amit Solanki", "amit@prayantr.com")
-  developer("Braj Pratap Singh", "braj@prayantr.com")
+namespace :contract do
+  desc "Download ClickSend's published OpenAPI files into tmp/openapi"
+  task :fetch do
+    ruby "script/fetch_openapi.rb"
+  end
 
-  self.name = "clicksend"
-  self.version = "0.0.3"
-  self.urls = ["http://github.com/prayantr/clicksend"]
-  license "MIT" # this should match the license in the README
+  desc "Run contract specs against ClickSend's published OpenAPI files (needs network)"
+  task run: :fetch do
+    sh({"CLICKSEND_CONTRACT" => "1", "COVERAGE" => "0"}, "bundle exec rspec --tag contract")
+  end
 end
 
-# vim: syntax=ruby
+desc "Run contract specs (downloads ClickSend's OpenAPI files)"
+task contract: "contract:run"
+
+task default: %i[spec standard]

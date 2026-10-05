@@ -1,0 +1,28 @@
+# Publishes the gem with RubyGems Trusted Publishing (OIDC, no stored API
+# key). Manual only, gated by the "rubygems" environment. Requires a trusted
+# publisher to be configured for this repository on rubygems.org first.
+#
+# Run it only after the version and CHANGELOG are committed on master:
+# `rake release` tags vX.Y.Z, pushes the tag and pushes the gem.
+name: Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: rubygems
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+      - run: bundle exec rspec
+      - uses: rubygems/release-gem@v1

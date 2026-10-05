@@ -1,0 +1,18 @@
+{
+  "http_code": 200,
+  "response_code": "SUCCESS",
+  "response_msg": "Your receipt.",
+  "data": {
+    "timestamp_send": 1722565661,
+    "timestamp": 1722565661,
+    "message_id": "D6D16B28-46AC-484A-AB0A-A08CD08EF75C",
+    "status_code": "201",
+    "status_text": "Success: Message received on handset.",
+    "error_code": null,
+    "error_text": null,
+    "custom_string": null,
+    "subaccount_id": 123456,
+    "message_type": "sms",
+    "digits": null
+  }
+}
