@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "net/http"
 
 # Optional checks against the real ClickSend API. Never part of normal CI.
