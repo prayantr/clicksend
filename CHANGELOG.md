@@ -4,7 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - Unreleased
+
+No changes to the library's behaviour or public API since 1.0.0.rc1.
+
+### Changed
+
+- README: installation instructions for the published `1.0.0.rc1` prerelease.
+- Documented that `SMS::Message#scheduled_at` mirrors ClickSend's `schedule` field, which
+  ClickSend sets to the send time for an immediate message.
+
+### Verification
+
+- The accepted SMS send path (`POST /v3/sms/send`) was verified live against ClickSend's free
+  test number, at no charge. The response was HTTP 200 with status `SUCCESS`, an upper-case UUID
+  message ID, an integer `date`, `message_parts: 0` and `message_price: "0.0000"`. A regression
+  spec pins this shape. Details are in [docs/clicksend-api-notes.md](docs/clicksend-api-notes.md).
+- Receipt retrieval and parsing are verified against ClickSend's published examples and the
+  contract specs. A live receipt was **not** observed: the test number did not generate one
+  during the two-minute observation window.
 
 ## [1.0.0.rc1] - 2026-10-05
 
@@ -54,6 +72,6 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
 - Last release of the original gem: send SMS, poll replies and delivery reports, and check
   the balance through ClickSend's v2 API.
 
-[Unreleased]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...HEAD
+[1.0.0]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...HEAD
 [1.0.0.rc1]: https://github.com/prayantr/clicksend/compare/c99edc5...v1.0.0.rc1
 [0.0.3]: https://github.com/prayantr/clicksend/tree/c99edc5
