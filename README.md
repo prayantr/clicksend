@@ -1,23 +1,37 @@
 # clicksend
 
-A focused, idiomatic Ruby client for ClickSend messaging: sending SMS (single and batch),
-delivery receipts, replies and account balance, over ClickSend's REST v3 API.
+[![CI](https://github.com/prayantr/clicksend/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/prayantr/clicksend/actions/workflows/ci.yml)
+[![Gem Version](https://img.shields.io/gem/v/clicksend)](https://rubygems.org/gems/clicksend)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
 
-It is **not** a replacement for ClickSend's official, full-API SDK and doesn't try to be.
-Every other ClickSend endpoint can still be reached through the same client with
-[`client.request`](#calling-other-clicksend-endpoints).
+A focused, idiomatic Ruby client for sending SMS with ClickSend's REST v3 API: single and batch
+sends, delivery receipts, replies and account balance.
 
-> **Unofficial.** Community-maintained; not affiliated with or endorsed by ClickSend.
->
-> **Status:** `1.0.0`, a rewrite of the 2014 `0.0.x` gem.
-> Upgrading? Read [MIGRATING.md](MIGRATING.md). The namespace changed from `ClickSend` to **`Clicksend`**.
+It deliberately concentrates on the messaging core and handles it carefully:
+- Timeouts are on by default.
+- Errors are typed.
+- A message ClickSend refuses inside an HTTP 200 response is reported as an error, not
+  silently treated as sent.
+- Retries are designed to avoid sending a duplicate SMS. A missed retry is recoverable; a
+  duplicate SMS is not.
+
+Endpoints it doesn't wrap are one [`client.request`](#calling-other-clicksend-endpoints) away.
+It is not a replacement for ClickSend's official, full-API SDK; for broad API coverage, use that
+instead ([which client should I use?](#which-client-should-i-use)).
 
 ```ruby
+require "clicksend"
+
 client = Clicksend::Client.new(username: ENV["CLICKSEND_USERNAME"], api_key: ENV["CLICKSEND_API_KEY"])
 
-message = client.sms.deliver(to: "+61411111111", body: "Your code is 481516", from: "Acme")
+message = client.sms.deliver(to: "+61411111111", body: "Your code is 481516")
 message.message_id # => "1ABC3200-C38C-6308-BE4B-C7C51D01DCF0"
 ```
+
+> **Stable (1.x)**. Unofficial: not affiliated with ClickSend.
+>
+> Upgrading from the 2014 `0.0.x` gem? Read [MIGRATING.md](MIGRATING.md). The namespace changed
+> from `ClickSend` to **`Clicksend`**.
 
 ## Contents
 
@@ -48,13 +62,14 @@ message.message_id # => "1ABC3200-C38C-6308-BE4B-C7C51D01DCF0"
 
 The two gems can be used side by side ([namespaces differ](#using-it-alongside-the-official-sdk)).
 
-How they differ for the messaging core:
+Comparison with ClickSend's official SDK (`clicksend_client` 6.0.2, September 2026). This is
+a snapshot; the official SDK may have changed since.
 
-| | `clicksend` (this gem) | `clicksend_client` (official, 6.x) |
+| | `clicksend` (this gem) | `clicksend_client` 6.0.2 |
 |---|---|---|
 | Scope | SMS, receipts, replies, balance; `client.request` for anything else | Most of the API, generated from OpenAPI |
 | Timeouts | On by default (30s read, 5s connect) | Off by default (`timeout = 0`) |
-| Retries | Built in; never re-sends a message that may already have reached ClickSend | None |
+| Retries | Built in; designed not to re-send a message that may already have reached ClickSend | None |
 | A message refused inside an HTTP 200 | `deliver` raises `MessageRejected`; `deliver_batch` exposes `#rejected` | Left for you to check |
 | Pagination | `auto_paging_each` | Manual `page`/`limit` |
 | Configuration | Immutable client instances | Global `Configuration.default` |
@@ -62,7 +77,8 @@ How they differ for the messaging core:
 
 ## Installation
 
-Requires Ruby 3.3 or newer.
+Requires Ruby 3.3 or newer. Tested on Ruby 3.3, 3.4 and 4.0; support for a Ruby ends in a minor
+release after its end of life.
 
 ```sh
 gem install clicksend
