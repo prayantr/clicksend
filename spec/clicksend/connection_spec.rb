@@ -189,6 +189,17 @@ RSpec.describe Clicksend::Connection, "retries" do
     expect(@transport.calls.size).to eq(3)
   end
 
+  it "never retries an error reported only inside a 2xx body, even a 429, even for GET" do
+    body = {"http_code" => 429, "response_code" => "HTTP_TOO_MANY_REQUESTS", "data" => nil}
+    expect { connection(FakeTransport.json(200, body), ok).request(:post, "/v3/sms/send", body: {}) }
+      .to raise_error(Clicksend::RateLimitError)
+    expect(@transport.calls.size).to eq(1)
+
+    expect { connection(FakeTransport.json(200, body.merge("http_code" => 503)), ok).request(:get, "/v3/x", idempotent: true) }
+      .to raise_error(Clicksend::ServerError)
+    expect(@transport.calls.size).to eq(1)
+  end
+
   it "re-sends the identical request on retry" do
     connection(FakeTransport.json(429, ""), ok).request(:post, "/v3/sms/send", query: {a: 1}, body: {b: 2})
     expect(@transport.calls.map(&:to_h).uniq.size).to eq(1)

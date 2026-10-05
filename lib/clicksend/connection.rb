@@ -37,22 +37,20 @@ module Clicksend
       end
 
       attempt = 0
-      begin
-        started = monotonic_now
-        raw = @transport.call(method, path, query: query, body: body, headers: headers)
-        log(:info) { "#{method.upcase} #{path} -> #{raw.status} (#{elapsed_ms(started)}ms)" }
-        build_response(raw)
-      rescue ConnectionError, APIError => e
-        delay = @retry_policy.delay(error: e, attempt: attempt, idempotent: idempotent)
-        raise unless delay
+      loop do
+        outcome, retry_allowed = attempt_request(method, path, query, body, headers)
+        return outcome if outcome.is_a?(Response)
+
+        error = outcome
+        delay = retry_allowed && @retry_policy.delay(error: error, attempt: attempt, idempotent: idempotent)
+        raise error unless delay
 
         attempt += 1
         log(:warn) do
-          "#{method.upcase} #{path} failed (#{e.class.name}), retrying in #{format("%.2f", delay)}s " \
+          "#{method.upcase} #{path} failed (#{error.class.name}), retrying in #{format("%.2f", delay)}s " \
             "(retry #{attempt} of #{@retry_policy.max_retries})"
         end
         Kernel.sleep(delay)
-        retry
       end
     end
 
@@ -63,11 +61,31 @@ module Clicksend
 
     private
 
-    def build_response(raw)
+    # One HTTP attempt. Returns a Response, or [error, retry_allowed]. Errors
+    # are returned rather than raised so the retry decision can use facts
+    # about this attempt without storing state on the (shared) Connection.
+    def attempt_request(method, path, query, body, headers)
+      started = monotonic_now
+      raw = @transport.call(method, path, query: query, body: body, headers: headers)
+      log(:info) { "#{method.upcase} #{path} -> #{raw.status} (#{elapsed_ms(started)}ms)" }
+      interpret(raw)
+    rescue ConnectionError => e
+      [e, true]
+    end
+
+    # @return [Response, Array(APIError, Boolean)]
+    def interpret(raw)
       body = parse_body(raw)
       status = effective_status(raw.status, body)
       return Response.new(status: raw.status, headers: raw.headers, body: body) if success?(status)
 
+      # An error reported only inside a 2xx body is undocumented for v3, so
+      # nothing is known about whether ClickSend acted on the request: never
+      # retry it, whatever the reported code.
+      [api_error(status, raw, body), status == raw.status]
+    end
+
+    def api_error(status, raw, body)
       envelope = body.is_a?(Hash) ? body : {}
       error_class = ERROR_CLASSES.fetch(status) do
         if status >= 500 then ServerError
@@ -75,7 +93,7 @@ module Clicksend
         else APIError
         end
       end
-      raise error_class.new(
+      error_class.new(
         http_status: status,
         response_code: string_or_nil(envelope["response_code"]),
         response_msg: string_or_nil(envelope["response_msg"]),
