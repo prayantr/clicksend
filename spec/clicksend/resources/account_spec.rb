@@ -37,6 +37,14 @@ RSpec.describe Clicksend::Resources::Account do
       expect(account.raw["_subaccount"]).to be_frozen
     end
 
+    it "leaves payloads without the key alone" do
+      [nil, {"subaccount_id" => 1}].each do |subaccount|
+        data = payload["data"].merge("_subaccount" => subaccount)
+        expect(Clicksend::Account.from_api(data).raw).to equal(data)
+      end
+      expect(Clicksend::Account.from_api(payload["data"].except("_subaccount")).raw).not_to have_key("_subaccount")
+    end
+
     it "leaves the escape hatch's Response#body untouched (documented: don't log it)" do
       expect(client.request(:get, "/v3/account").body.dig("data", "_subaccount", "api_key")).to eq("SECRET-ECHOED-KEY")
     end
