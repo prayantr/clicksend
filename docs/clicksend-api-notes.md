@@ -89,7 +89,7 @@ knows the first attempt did not reach ClickSend, or that ClickSend did not act o
 
 | Failure | How the gem knows | Retried |
 |---|---|---|
-| 429 | ClickSend documents it as "a request cannot be served due to the application's rate limit". The body (`"Too many attempts."`) is the rate limiter's response, which is produced before the request is handled | every method, honouring `Retry-After` up to 30s |
+| 429 | ClickSend documents it as "a request cannot be served due to the application's rate limit". Inferred, not documented: the observed body (`"Too many attempts."`) looks like a throttling layer's response, produced before the request is handled | every method, honouring `Retry-After` up to 30s |
 | Connection refused, DNS failure, connect timeout (`Net::OpenTimeout`) | These can only happen before the request is written | every method |
 | Read timeout, connection reset, broken pipe, unreachable host mid-request | The request may have been written and processed | idempotent requests only |
 | TLS errors | Usually a handshake failure (not sent), but `OpenSSL::SSL::SSLError` also covers failures after the request was written | idempotent requests only |
