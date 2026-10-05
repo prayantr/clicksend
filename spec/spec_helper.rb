@@ -5,6 +5,7 @@ if ENV.fetch("COVERAGE", "1") == "1"
   SimpleCov.start do
     enable_coverage :branch
     skip "/spec/"
+    skip "/script/"
   end
 end
 
