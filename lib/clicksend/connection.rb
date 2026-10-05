@@ -19,18 +19,20 @@ module Clicksend
       429 => RateLimitError
     }.freeze
 
-    def initialize(transport:, retry_policy:, logger: nil)
+    # @param headers [Hash] sent with every request (authentication, User-Agent)
+    def initialize(transport:, retry_policy:, headers: {}, logger: nil)
       @transport = transport
       @retry_policy = retry_policy
+      @headers = headers.dup.freeze
       @logger = logger
     end
 
     # @return [Clicksend::Response]
     # @raise [Clicksend::Error]
     def request(method, path, query: nil, body: nil, idempotent: false)
-      headers = {}
+      headers = @headers
       unless body.nil?
-        headers["Content-Type"] = "application/json"
+        headers = headers.merge("Content-Type" => "application/json")
         body = JSON.generate(body)
       end
 
@@ -52,6 +54,11 @@ module Clicksend
         Kernel.sleep(delay)
         retry
       end
+    end
+
+    # Never show the Authorization header.
+    def inspect
+      "#<#{self.class.name}>"
     end
 
     private

@@ -4,7 +4,7 @@ if ENV.fetch("COVERAGE", "1") == "1"
   require "simplecov"
   SimpleCov.start do
     enable_coverage :branch
-    add_filter "/spec/"
+    skip "/spec/"
   end
 end
 

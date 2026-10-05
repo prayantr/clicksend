@@ -2,26 +2,18 @@
 
 RSpec.describe Clicksend::Transport::Faraday do
   subject(:transport) do
-    described_class.new(
-      base_url: "https://rest.clicksend.com", username: "user", api_key: "secret-key",
-      timeout: 12, open_timeout: 3, user_agent: "clicksend-ruby/test"
-    )
+    described_class.new(base_url: "https://rest.clicksend.com", timeout: 12, open_timeout: 3)
   end
 
   let(:url) { "https://rest.clicksend.com/v3/sms/send" }
 
-  it "sends the method, path, query, body and headers, with basic auth" do
+  it "sends the method, path, query, body and the given headers" do
     stub = stub_request(:post, url)
-      .with(
-        basic_auth: %w[user secret-key],
-        query: {"page" => "2"},
-        body: '{"a":1}',
-        headers: {"Content-Type" => "application/json", "User-Agent" => "clicksend-ruby/test", "Accept" => "application/json"}
-      )
+      .with(query: {"page" => "2"}, body: '{"a":1}', headers: {"Content-Type" => "application/json", "X-Test" => "yes"})
       .to_return(status: 200, body: "{}", headers: {"X-RateLimit-Limit" => "20"})
 
     response = transport.call(:post, "/v3/sms/send", query: {page: 2}, body: '{"a":1}',
-      headers: {"Content-Type" => "application/json"})
+      headers: {"Content-Type" => "application/json", "X-Test" => "yes"})
 
     expect(stub).to have_been_requested.once
     expect(response).to eq(Clicksend::Transport::Response.new(status: 200, headers: {"x-ratelimit-limit" => "20"}, body: "{}"))
@@ -76,10 +68,6 @@ RSpec.describe Clicksend::Transport::Faraday do
 
     it "keeps the original exception as the cause" do
       expect(failure_for(Errno::ECONNREFUSED).cause).to be_a(Faraday::ConnectionFailed)
-    end
-
-    it "never includes the API key in the error message" do
-      expect(failure_for(Errno::ECONNREFUSED).message).not_to include("secret-key")
     end
   end
 end

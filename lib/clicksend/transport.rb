@@ -10,9 +10,11 @@ module Clicksend
   #
   #   call(method, path, query:, body:, headers:) # => Clicksend::Transport::Response
   #
-  # where +body+ is an already-encoded String (or nil), and that raises
-  # Clicksend::ConnectionError / Clicksend::TimeoutError when no HTTP response
-  # was received. Pass a custom one to Client.new(transport:) to replace Faraday.
+  # where +body+ is an already-encoded String (or nil) and +headers+ already
+  # include authentication, and that raises Clicksend::ConnectionError /
+  # Clicksend::TimeoutError when no HTTP response was received. Transports hold
+  # no credentials. Pass a custom one to Client.new(transport:) to replace
+  # Faraday; it is then responsible for its own timeouts.
   module Transport
     # A raw HTTP response: Integer status, Hash of lower-cased headers, String body.
     Response = Data.define(:status, :headers, :body)
@@ -29,13 +31,8 @@ module Clicksend
       # @param adapter [Symbol, Array, nil] a Faraday adapter name, optionally
       #   with arguments (e.g. +[:net_http_persistent, {pool_size: 5}]+).
       #   Defaults to Faraday.default_adapter (Net::HTTP).
-      def initialize(base_url:, username:, api_key:, timeout:, open_timeout:, user_agent:, adapter: nil)
-        @connection = ::Faraday.new(
-          url: base_url,
-          headers: {"User-Agent" => user_agent, "Accept" => "application/json"},
-          request: {timeout: timeout, open_timeout: open_timeout}
-        ) do |builder|
-          builder.request :authorization, :basic, username, api_key
+      def initialize(base_url:, timeout:, open_timeout:, adapter: nil)
+        @connection = ::Faraday.new(url: base_url, request: {timeout: timeout, open_timeout: open_timeout}) do |builder|
           builder.adapter(*Array(adapter || ::Faraday.default_adapter))
         end
       end
