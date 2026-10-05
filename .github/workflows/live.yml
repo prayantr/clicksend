@@ -1,0 +1,29 @@
+# Optional checks against the real ClickSend API. Manual only; never part of
+# normal CI. Credentials come from the "live" environment's secrets
+# (CLICKSEND_USERNAME, CLICKSEND_API_KEY), never from the repository. Sends
+# go only to ClickSend's documented, free test number.
+name: Live API
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    environment: live
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+      - run: bundle exec rspec --tag live
+        env:
+          CLICKSEND_LIVE: "1"
+          CLICKSEND_USERNAME: ${{ secrets.CLICKSEND_USERNAME }}
+          CLICKSEND_API_KEY: ${{ secrets.CLICKSEND_API_KEY }}
