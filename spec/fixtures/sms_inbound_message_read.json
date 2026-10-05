@@ -1,0 +1,6 @@
+{
+  "http_code": 200,
+  "response_code": "SUCCESS",
+  "response_msg": "Receipt have been marked as read.",
+  "data": 1
+}

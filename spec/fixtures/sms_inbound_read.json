@@ -1,0 +1,6 @@
+{
+  "http_code": 200,
+  "response_code": "SUCCESS",
+  "response_msg": "Inbound messages have been marked as read.",
+  "data": null
+}

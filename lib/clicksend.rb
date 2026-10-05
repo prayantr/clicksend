@@ -7,6 +7,9 @@ require_relative "clicksend/response"
 require_relative "clicksend/retry_policy"
 require_relative "clicksend/connection"
 require_relative "clicksend/page"
+require_relative "clicksend/model"
+require_relative "clicksend/account"
+require_relative "clicksend/resources/account"
 require_relative "clicksend/client"
 
 # Unofficial Ruby client for the ClickSend v3 REST API.
