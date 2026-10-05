@@ -84,7 +84,7 @@ module Clicksend
 
     # Calls any ClickSend v3 endpoint, wrapped by this gem or not.
     #
-    #   client.request(:get, "/v3/sms/history", query: {date_from: 1.day.ago.to_i})
+    #   client.request(:get, "/v3/sms/history", query: {date_from: (Time.now - 86_400).to_i})
     #   client.request(:post, "/v3/sms/templates", body: {template_name: "otp", body: "Code: {code}"})
     #
     # Paths are written exactly as in ClickSend's API reference (starting with
@@ -142,8 +142,10 @@ module Clicksend
 
     private
 
+    # Surrounding whitespace (e.g. a trailing newline from a secrets file) is
+    # stripped; ClickSend usernames and API keys never contain it.
     def credential!(value, name, env_name)
-      return value if value.is_a?(String) && !value.strip.empty?
+      return value.strip if value.is_a?(String) && !value.strip.empty?
 
       raise ConfigurationError, "Missing ClickSend #{name}: pass #{name}: or set #{env_name}"
     end
@@ -166,9 +168,14 @@ module Clicksend
       raise ConfigurationError, "base_url is not a valid URL: #{value.inspect}"
     end
 
+    # Only a path on the configured host is accepted: no scheme, no host
+    # ("//evil.example"), nothing URI can't parse.
     def validate_path!(path)
-      return if path.is_a?(String) && path.start_with?("/") && !path.start_with?("//") && !path.match?(/[[:cntrl:] ]/)
+      uri = URI.parse(path) if path.is_a?(String) && path.start_with?("/") && !path.match?(/[[:cntrl:] ]/)
+      return if uri && uri.scheme.nil? && uri.host.nil?
 
+      raise ArgumentError, "path must be an absolute path such as \"/v3/account\", not #{path.inspect}"
+    rescue URI::InvalidURIError
       raise ArgumentError, "path must be an absolute path such as \"/v3/account\", not #{path.inspect}"
     end
   end

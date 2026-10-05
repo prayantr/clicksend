@@ -34,6 +34,12 @@ RSpec.describe Clicksend::Client do
       end
     end
 
+    it "strips whitespace around credentials (e.g. a trailing newline from a secrets file)" do
+      stub = stub_request(:get, "#{ApiHelpers::BASE}/v3/account").with(basic_auth: %w[user key]).to_return(json_response(envelope({})))
+      described_class.new(username: " user\n", api_key: "key\n").request(:get, "/v3/account")
+      expect(stub).to have_been_requested
+    end
+
     it "is frozen" do
       expect(client).to be_frozen
     end
@@ -106,7 +112,7 @@ RSpec.describe Clicksend::Client do
 
     it "rejects unsupported methods, malformed paths and full URLs" do
       expect { client.request(:head, "/v3/x") }.to raise_error(ArgumentError, /unsupported HTTP method/)
-      ["v3/account", "https://evil.example/v3/account", "//evil.example/v3", "/v3/a b", nil].each do |path|
+      ["v3/account", "https://evil.example/v3/account", "//evil.example/v3", "/v3/a b", "/\\evil.example/x", "/v3/x\n", nil].each do |path|
         expect { client.request(:get, path) }.to raise_error(ArgumentError, /path must be/), path.inspect
       end
       expect { client.request(:get, "/v3/x", query: "a=1") }.to raise_error(ArgumentError, /query must be a Hash/)

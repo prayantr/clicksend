@@ -25,6 +25,13 @@ RSpec.describe Clicksend::Transport::Faraday do
     expect(connection.options.open_timeout).to eq(3)
   end
 
+  it "returns frozen, lower-cased headers" do
+    stub_request(:get, "https://rest.clicksend.com/v3/account").to_return(status: 200, body: "{}", headers: {"Retry-After" => "1"})
+    headers = transport.call(:get, "/v3/account").headers
+    expect(headers).to eq("retry-after" => "1")
+    expect(headers).to be_frozen
+  end
+
   it "returns non-2xx responses instead of raising (status mapping happens in Connection)" do
     stub_request(:get, "https://rest.clicksend.com/v3/account").to_return(status: 401, body: "denied")
     expect(transport.call(:get, "/v3/account").status).to eq(401)
@@ -58,6 +65,15 @@ RSpec.describe Clicksend::Transport::Faraday do
 
     it "maps a DNS failure to ConnectionError that was not sent" do
       expect(failure_for(SocketError.new("getaddrinfo")).request_may_have_been_sent?).to be(false)
+    end
+
+    it "treats TLS errors as possibly sent (they can happen after the request was written)" do
+      error = failure_for(OpenSSL::SSL::SSLError.new("SSL_read: unexpected eof while reading"))
+      expect(error.request_may_have_been_sent?).to be(true)
+    end
+
+    it "treats an unreachable host as possibly sent" do
+      expect(failure_for(Errno::EHOSTUNREACH).request_may_have_been_sent?).to be(true)
     end
 
     it "treats a reset connection as possibly sent" do

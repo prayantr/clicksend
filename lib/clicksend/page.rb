@@ -30,7 +30,8 @@ module Clicksend
         raise ArgumentError, "limit must be an Integer between #{LIMITS.min} and #{LIMITS.max} (ClickSend's documented range)"
       end
 
-      response = client.request(:get, path, query: query.merge(page: page, limit: limit).compact)
+      query = query.transform_keys(&:to_s)
+      response = client.request(:get, path, query: query.merge("page" => page, "limit" => limit).compact)
       fetch_page = ->(number) { fetch(client, path, query: query, page: number, limit: limit, &build_item) }
       from_response(response, fetch_page, &build_item)
     end

@@ -21,12 +21,11 @@ module Clicksend
 
     # The default transport, built on Faraday 2.
     class Faraday
-      # Low-level failures that happen before the request is written to the
-      # socket. A request that failed this way cannot have reached ClickSend.
-      NOT_SENT_ERRORS = [
-        "Errno::ECONNREFUSED", "Errno::EHOSTUNREACH", "Errno::ENETUNREACH",
-        "SocketError", "Net::OpenTimeout", "OpenSSL::SSL::SSLError"
-      ].freeze
+      # Failures that can only happen while connecting, before the request is
+      # written, so the request cannot have reached ClickSend. Deliberately
+      # narrow: TLS errors and unreachable-host errors can also occur after
+      # the request was sent, so they count as "may have been sent".
+      NOT_SENT_ERRORS = ["Errno::ECONNREFUSED", "SocketError", "Net::OpenTimeout"].freeze
 
       # @param adapter [Symbol, Array, nil] a Faraday adapter name, optionally
       #   with arguments (e.g. +[:net_http_persistent, {pool_size: 5}]+).
@@ -43,7 +42,7 @@ module Clicksend
         end
         Response.new(
           status: response.status,
-          headers: response.headers.to_h.transform_keys { |key| key.to_s.downcase },
+          headers: response.headers.to_h.transform_keys { |key| key.to_s.downcase }.freeze,
           body: response.body.to_s
         )
       rescue ::Faraday::TimeoutError => e

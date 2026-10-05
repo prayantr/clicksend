@@ -34,6 +34,12 @@ RSpec.describe Clicksend::Page do
     expect(second).to have_been_requested
   end
 
+  it "lets explicit page/limit win over string-keyed query values without duplicating them" do
+    stub = stub_api(:get, "/v3/things", query: {"page" => "3", "q" => "x"}).to_return(json_response(page_payload(3, 3, [])))
+    client.paginate("/v3/things", query: {"page" => 9, "q" => "x"}, page: 3)
+    expect(stub).to have_been_requested
+  end
+
   it "walks all pages lazily with auto_paging_each" do
     stub_page(1, 3, [{"id" => 1}, {"id" => 2}])
     second = stub_page(2, 3, [{"id" => 3}])
