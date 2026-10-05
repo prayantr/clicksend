@@ -69,6 +69,10 @@ RSpec.describe "ClickSend live API", :live, order: :defined do
   end
 
   def error_summary(error)
+    if error.is_a?(Clicksend::MessageRejected)
+      return {class: error.class.name, status: error.status, price: error.result.price, shape: shape(error.result.raw)}
+    end
+
     {class: error.class.name, http_status: error.respond_to?(:http_status) ? error.http_status : nil,
      response_code: error.respond_to?(:response_code) ? error.response_code : nil,
      response_msg: error.respond_to?(:response_msg) ? error.response_msg : nil,
