@@ -63,7 +63,9 @@ These were found by the contract specs (`bundle exec rake contract`), which pin 
 ## Defensive behaviour (not documented for v3)
 
 - A 2xx response whose envelope `http_code` is >= 400 is treated as that error. This was observed
-  on the legacy v2 host, where `send.json` answers HTTP 200 with `{"http_code":401,...}`.
+  on the legacy v2 host, where `send.json` answers HTTP 200 with `{"http_code":401,...}`. Such
+  errors are **never retried**, whatever the code. Undocumented behaviour gives no basis for
+  knowing whether ClickSend processed the request.
 - Duplicate keys in a JSON response are not specially handled. With json 2.x, Ruby warns and
   the last value wins. json 3.x rejects them by default, which surfaces as `MalformedResponseError`.
 
@@ -79,3 +81,25 @@ Run the optional live specs (see CONTRIBUTING.md) to settle these:
 - [ ] Whether `PUT /sms/receipts-read` and `/sms/inbound-read` accept an empty JSON object
 - [ ] Inbound timestamp field name in real responses (`timestamp` or `timestamp_send`)
 - [ ] Whether `message_id` values are always UUID-like. The gem accepts `[A-Za-z0-9-]+` in paths.
+
+## Retry safety: the rules and why
+
+ClickSend's send endpoints accept no idempotency key. A retry is only safe when the gem
+knows the first attempt did not reach ClickSend, or that ClickSend did not act on it.
+
+| Failure | How the gem knows | Retried |
+|---|---|---|
+| 429 | ClickSend documents it as "a request cannot be served due to the application's rate limit". The body (`"Too many attempts."`) is the rate limiter's response, which is produced before the request is handled | every method, honouring `Retry-After` up to 30s |
+| Connection refused, DNS failure, connect timeout (`Net::OpenTimeout`) | These can only happen before the request is written | every method |
+| Read timeout, connection reset, broken pipe, unreachable host mid-request | The request may have been written and processed | idempotent requests only |
+| TLS errors | Usually a handshake failure (not sent), but `OpenSSL::SSL::SSLError` also covers failures after the request was written | idempotent requests only |
+| 5xx | ClickSend may have acted before failing | idempotent requests only |
+| Error reported only inside a 2xx body | Undocumented | never |
+
+"Idempotent" means `GET`, plus the gem's mark-read calls. `client.request` assumes only `GET`,
+because ClickSend uses `POST` and `PUT` for sends, purchases and credit transfers.
+
+Underneath the gem there are no hidden retries. `Net::HTTP` retries `GET`/`PUT`/`DELETE`
+itself unless `max_retries` is 0, and faraday-net_http sets it to 0.
+`spec/integration/send_safety_spec.rb` checks all of this with a local server that counts
+arrivals.

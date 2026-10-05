@@ -1,11 +1,28 @@
 # Migrating from clicksend 0.0.x to 1.0
 
+> ## The namespace changed: `ClickSend` → `Clicksend`
+>
+> ```ruby
+> ClickSend::REST::Client   # 0.0.x  (capital S)   — removed
+> Clicksend::Client         # 1.0    (lower-case s)
+> ```
+>
+> The two names differ only by one capital letter, so the change is easy to miss.
+> `ClickSend` (capital S) now belongs to ClickSend's **official** SDK, `clicksend_client` 6.x.
+> Code that still says `ClickSend::` fails with a `NameError`. If the official gem is also
+> loaded, `ClickSend` resolves to *that* gem instead, so the errors will point at its
+> namespace, which can be confusing. Search for it:
+>
+> ```sh
+> grep -rn "ClickSend::" app lib config
+> ```
+
 1.0 is a rewrite. Nothing from 0.0.x carries over unchanged. Three things changed underneath:
 
 - **The ClickSend API.** 0.0.x called ClickSend's legacy v2 API (`api.clicksend.com/rest/v2/*.json`).
   1.0 uses the current REST v3 API (`rest.clicksend.com/v3`).
 - **Ruby and its dependencies.** 0.0.x does not load on Ruby 3.4+, and it is incompatible with Faraday 2.
-- **The Ruby namespace.** See the next section.
+- **The Ruby namespace.** See above and section 1.
 
 Your ClickSend **username and API key keep working**. Both API versions use the same HTTP Basic credentials.
 
@@ -19,8 +36,7 @@ ClickSend::REST::Client.new(...)
 Clicksend::Client.new(...)
 ```
 
-The constant changed from `ClickSend` to `Clicksend`; note the lower-case **s**. It is the only
-rename in this guide that differs from the old name by letter case alone, so it's easy to miss.
+The constant changed from `ClickSend` to `Clicksend`; note the lower-case **s**.
 
 Why: in 2026 ClickSend's official Ruby SDK (`clicksend_client` 6.x) adopted `ClickSend`
 as its namespace. It defines constants such as `ClickSend::VERSION`, `ClickSend::Account` and
@@ -52,6 +68,7 @@ grep -rn "ClickSend::\|ClickSendError\|\.messages\.send\|delivery_report\|accoun
 | `client.account_balance` | `client.account.fetch.balance` |
 | `client.account_balance(:country => "AU")` | No v3 equivalent. For prices to a country, use `client.request(:post, "/v3/sms/price", body: {...}, idempotent: true)`. |
 | `rescue ClickSend::ClickSendError` | `rescue Clicksend::Error`, or a specific subclass (see README → Errors) |
+| (none) | `client.request(:get, "/v3/...")` for any endpoint 1.0 doesn't wrap |
 | `client.inspect` showed the API key | It no longer does |
 
 ## 3. Send parameters

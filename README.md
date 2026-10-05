@@ -1,15 +1,16 @@
 # clicksend
 
-A small, focused Ruby client for the [ClickSend](https://www.clicksend.com) SMS API (REST v3).
-It covers sending single and batch SMS, delivery receipts, replies and your account
-balance, plus a documented way to call every other ClickSend endpoint.
+A focused, idiomatic Ruby client for ClickSend messaging: sending SMS (single and batch),
+delivery receipts, replies and account balance, over ClickSend's REST v3 API.
 
-> **Unofficial.** This gem is community-maintained and not affiliated with or endorsed by
-> ClickSend. ClickSend publishes its own generated SDK, [`clicksend_client`](https://rubygems.org/gems/clicksend_client).
+It is **not** a replacement for ClickSend's official, full-API SDK and doesn't try to be.
+Every other ClickSend endpoint can still be reached through the same client with
+[`client.request`](#calling-other-clicksend-endpoints).
+
+> **Unofficial.** Community-maintained; not affiliated with or endorsed by ClickSend.
 >
-> **Status:** `1.0.0.rc1`, a full rewrite of the 2014 `0.0.x` gem. It has not been released to
-> RubyGems yet. Upgrading from 0.0.x? Read [MIGRATING.md](MIGRATING.md). The namespace changed
-> from `ClickSend` to `Clicksend`.
+> **Status:** `1.0.0.rc1`, a rewrite of the 2014 `0.0.x` gem. It is not yet released to RubyGems.
+> Upgrading? Read [MIGRATING.md](MIGRATING.md). The namespace changed from `ClickSend` to **`Clicksend`**.
 
 ```ruby
 client = Clicksend::Client.new(username: ENV["CLICKSEND_USERNAME"], api_key: ENV["CLICKSEND_API_KEY"])
@@ -20,7 +21,7 @@ message.message_id # => "1ABC3200-C38C-6308-BE4B-C7C51D01DCF0"
 
 ## Contents
 
-- [Why this gem?](#why-this-gem)
+- [Which client should I use?](#which-client-should-i-use)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Sending SMS](#sending-sms)
@@ -34,22 +35,27 @@ message.message_id # => "1ABC3200-C38C-6308-BE4B-C7C51D01DCF0"
 - [Testing your application](#testing-your-application)
 - [What is covered](#what-is-covered)
 - [Using it alongside the official SDK](#using-it-alongside-the-official-sdk)
+- [Background and design](#background-and-design)
 - [Development](#development)
 
-## Why this gem?
+## Which client should I use?
 
-ClickSend's official SDK is generated from their OpenAPI description and covers
-almost the whole API. Use it if you need broad coverage (email, campaigns, numbers,
-automations, and so on).
+| You want to… | Use |
+|---|---|
+| Send SMS from a Ruby app and track delivery and replies, with safe defaults | **this gem** |
+| Call the occasional ClickSend endpoint this gem doesn't wrap (price a message, cancel a scheduled one, list templates or history) from the same client | **this gem's [`client.request`](#calling-other-clicksend-endpoints)** |
+| Work with large parts of the API (email, campaigns, contacts, numbers, automations, subaccounts, and so on) with generated models for each | ClickSend's official SDK, [`clicksend_client`](https://rubygems.org/gems/clicksend_client) |
 
-This gem does less on purpose. It handles the messaging core carefully:
+The two gems can be used side by side ([namespaces differ](#using-it-alongside-the-official-sdk)).
 
-| | `clicksend` (this gem) | `clicksend_client` (official) |
+How they differ for the messaging core:
+
+| | `clicksend` (this gem) | `clicksend_client` (official, 6.x) |
 |---|---|---|
-| Scope | SMS, receipts, replies, balance, plus `client.request` for any endpoint | Most of the API, generated |
+| Scope | SMS, receipts, replies, balance; `client.request` for anything else | Most of the API, generated from OpenAPI |
 | Timeouts | On by default (30s read, 5s connect) | Off by default (`timeout = 0`) |
-| Retries | Built in, and never re-sends a message that may already have been accepted | None |
-| Failed messages inside an HTTP 200 | `deliver` raises `MessageRejected`; `deliver_batch` exposes `#rejected` | Left for you to check |
+| Retries | Built in; never re-sends a message that may already have reached ClickSend | None |
+| A message refused inside an HTTP 200 | `deliver` raises `MessageRejected`; `deliver_batch` exposes `#rejected` | Left for you to check |
 | Pagination | `auto_paging_each` | Manual `page`/`limit` |
 | Configuration | Immutable client instances | Global `Configuration.default` |
 | Runtime dependencies | Faraday 2 | Typhoeus (libcurl) |
@@ -262,6 +268,11 @@ send something twice**:
 | Connection refused, DNS failure, connect timeout | every request: it never reached ClickSend |
 | Read timeout, connection reset, 5xx | idempotent requests only: `GET`s and the gem's mark-read calls |
 
+Two more cases are never retried. An error that ClickSend reports only inside a 2xx
+response body is undocumented behaviour, so nothing is known about whether the request was
+processed. And when the gem can't tell whether a failure happened before or after the
+request was sent, it assumes after. A missed retry is recoverable; a duplicate SMS is not.
+
 ClickSend's send endpoint has no idempotency key. So a send that times out is **not**
 retried, and you get a `Clicksend::TimeoutError` whose `request_may_have_been_sent?` is
 `true`. The message may or may not have gone out. Before sending again, check with your own
@@ -271,6 +282,10 @@ retried, and you get a `Clicksend::TimeoutError` whose `request_may_have_been_se
 history = client.paginate("/v3/sms/history", query: {date_from: started_at.to_i})
 already_sent = history.auto_paging_each.any? { |m| m["custom_string"] == "otp:user-42" }
 ```
+
+These retries happen inside the gem. The default Net::HTTP adapter does no retrying of its
+own: Faraday sets `max_retries = 0`, and a test pins this. If you pass a different `adapter:`,
+check whether that library retries requests by itself.
 
 ## Calling other ClickSend endpoints
 
@@ -363,6 +378,50 @@ documentation that affect this gem are in [docs/clicksend-api-notes.md](docs/cli
 
 This gem's namespace is `Clicksend`. ClickSend's official `clicksend_client` (6.x) uses
 `ClickSend`. The two gems can be installed and loaded in the same application without conflicting.
+
+## Background and design
+
+**History.** This gem was first written in 2014 against ClickSend's v2 API, which was
+form-encoded and reported errors as HTTP 200 with result codes. That version (0.0.3) no longer
+loads on current Ruby or Faraday, and ClickSend has since moved to a JSON REST v3 API. In 2026
+ClickSend also released a regenerated official Ruby SDK covering most of v3. Rebuilding a
+second full SDK would duplicate that work, so 1.0 is a rewrite that does one thing carefully:
+messaging.
+
+**Scope.** A small set of wrapped methods returns immutable value objects for the
+things messaging apps touch most: sent messages, batches, receipts, replies, the account.
+Every model keeps ClickSend's full payload in `#raw`. Everything else goes through
+`client.request` and `client.paginate`. These are the same code path the wrapped methods
+use, not a separate low-level client. New ClickSend endpoints are therefore usable on the
+day they ship, without waiting for a release of this gem.
+
+**Architecture.**
+- `Transport::Faraday` is the only file that knows about Faraday. It holds no credentials,
+  and it can be replaced with any object that implements one method.
+- `Connection` encodes requests, parses ClickSend's response envelope, maps statuses to
+  errors, and applies the retry policy.
+- `Client` validates configuration, rejects any path that could reach another host, and is
+  frozen after construction.
+
+**Not sending a message twice.** ClickSend accepts no idempotency key, so the gem decides
+when a retry is safe from what it knows about each failure. That covers the HTTP status, and
+whether the connection failed before or after the request could have been sent. Where it
+can't tell, it doesn't retry. An end-to-end spec runs the real HTTP stack against a local
+server. It shows that a send arrives exactly once after a connection close, a reset, a read
+timeout, a 5xx response or a failed TLS handshake.
+
+**Testing against the API contract.**
+- **Fixtures.** Response fixtures are ClickSend's own published examples, generated from its
+  OpenAPI files.
+- **Contract specs** (run weekly and on pull requests) check four things: that each wrapped
+  endpoint still exists, that the request bodies the gem builds validate against ClickSend's
+  schemas, that the fixtures still match ClickSend's current examples, and that they conform
+  to the response schemas. The places where ClickSend's own examples contradict its schemas
+  are listed explicitly in the specs.
+- **Live specs.** An optional suite runs against the real API, using ClickSend's free test
+  numbers only.
+- **API notes.** What was verified, what is ambiguous in the documentation, and what was
+  observed live is recorded in [docs/clicksend-api-notes.md](docs/clicksend-api-notes.md).
 
 ## Development
 

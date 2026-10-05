@@ -24,20 +24,24 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
   Adds `#with` for derived clients and redacts the API key everywhere.
 - `client.sms.deliver` and `client.sms.deliver_batch`. Per-message rejections inside HTTP 200
   responses raise `Clicksend::MessageRejected` for single sends and are reported by
-  `Batch#rejected` for batches.
+  `Batch#rejected` for batches, which are `Enumerable` over their messages.
 - Delivery receipts: `client.sms.receipts`, `#receipt`, `#mark_receipts_read`, plus
   `Receipt#delivered?`, `#failed?` and `#pending?`.
 - Replies: `client.sms.inbound`, `#mark_inbound_read` and `#mark_inbound_message_read`.
 - `client.account.fetch` (balance and currency).
 - `Clicksend::Page` with lazy `#auto_paging_each`.
 - `client.request` and `client.paginate`, to call any ClickSend endpoint through the same
-  authentication, timeouts, retries, errors and parsing.
+  authentication, timeouts, retries, errors and parsing. They return `Clicksend::Response`
+  (`#http_status`, `#headers`, `#body`, `#data`). Paths must stay on the configured ClickSend
+  origin: absolute URLs, `//host`, whitespace and control characters are rejected, and
+  redirects are not followed.
 - Typed error hierarchy: `ConfigurationError`, `ConnectionError`/`TimeoutError`, `APIError`
   (`BadRequestError`, `AuthenticationError`, `ForbiddenError`, `NotFoundError`,
   `RateLimitError`, `ServerError`), `MalformedResponseError` and `MessageRejected`.
-- Send-safe retries. Requests ClickSend did not process (429, refused connections) are retried
-  for every method. Timeouts and 5xx responses are retried only for idempotent requests, so a
-  message is never sent twice by the gem.
+- Send-safe retries. Requests ClickSend did not process (429, refused connections, DNS
+  failures, connect timeouts) are retried for every method. Read timeouts, resets, TLS errors
+  and 5xx responses are retried only for idempotent requests. Errors reported only inside a 2xx
+  body are never retried. The gem never re-sends a message that may have reached ClickSend.
 - Optional `logger:`, which never logs credentials, query strings or bodies.
 - Replaceable HTTP layer (`transport:`), plus a Faraday `adapter:` option.
 - Contract specs against ClickSend's published OpenAPI files, and optional live specs.
