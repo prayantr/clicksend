@@ -9,7 +9,7 @@ Every other ClickSend endpoint can still be reached through the same client with
 
 > **Unofficial.** Community-maintained; not affiliated with or endorsed by ClickSend.
 >
-> **Status:** `1.0.0.rc1`, a rewrite of the 2014 `0.0.x` gem. It is not yet released to RubyGems.
+> **Status:** `1.0.0.rc1`, a rewrite of the 2014 `0.0.x` gem, published on RubyGems as a prerelease.
 > Upgrading? Read [MIGRATING.md](MIGRATING.md). The namespace changed from `ClickSend` to **`Clicksend`**.
 
 ```ruby
@@ -64,18 +64,17 @@ How they differ for the messaging core:
 
 Requires Ruby 3.3 or newer.
 
-`1.0.0.rc1` is not on RubyGems yet; RubyGems still serves the 2014 release, 0.0.3.
-Until 1.0 is released, install from GitHub:
+`1.0.0.rc1` is on RubyGems as a **prerelease**. RubyGems and Bundler only install a prerelease
+when you ask for one. A plain `gem install clicksend`, or a Gemfile line without a version,
+still gets the 2014 release, 0.0.3. To get rc1:
 
-```ruby
-# Gemfile
-gem "clicksend", github: "prayantr/clicksend"
+```sh
+gem install clicksend --pre
 ```
 
-Once 1.0 is released:
-
 ```ruby
-gem "clicksend", "~> 1.0"
+# Gemfile: accepts 1.0.0.rc1 now, and 1.0.x once 1.0.0 is released
+gem "clicksend", "~> 1.0.0.rc1"
 ```
 
 The only runtime dependency is [Faraday](https://github.com/lostisland/faraday) 2.x.

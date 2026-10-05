@@ -4,7 +4,9 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0.rc1] - Unreleased
+## [Unreleased]
+
+## [1.0.0.rc1] - 2026-10-05
 
 A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRATING.md).
 
@@ -52,5 +54,6 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
 - Last release of the original gem: send SMS, poll replies and delivery reports, and check
   the balance through ClickSend's v2 API.
 
-[1.0.0.rc1]: https://github.com/prayantr/clicksend/compare/c99edc5...HEAD
+[Unreleased]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...HEAD
+[1.0.0.rc1]: https://github.com/prayantr/clicksend/compare/c99edc5...v1.0.0.rc1
 [0.0.3]: https://github.com/prayantr/clicksend/tree/c99edc5
