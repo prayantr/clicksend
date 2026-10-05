@@ -41,13 +41,17 @@ RSpec.configure do |config|
 
   # Credentials must never leak in from the developer's shell (live specs opt out).
   config.around do |example|
-    next example.run if example.metadata[:live]
-
-    saved = ENV.to_h.slice("CLICKSEND_USERNAME", "CLICKSEND_API_KEY")
-    ENV.delete("CLICKSEND_USERNAME")
-    ENV.delete("CLICKSEND_API_KEY")
-    example.run
-  ensure
-    saved.each { |k, v| ENV[k] = v }
+    if example.metadata[:live]
+      example.run
+    else
+      begin
+        saved = ENV.to_h.slice("CLICKSEND_USERNAME", "CLICKSEND_API_KEY")
+        ENV.delete("CLICKSEND_USERNAME")
+        ENV.delete("CLICKSEND_API_KEY")
+        example.run
+      ensure
+        saved.each { |k, v| ENV[k] = v }
+      end
+    end
   end
 end
