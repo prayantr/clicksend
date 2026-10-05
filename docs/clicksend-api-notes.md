@@ -1,7 +1,8 @@
 # ClickSend API notes
 
 How this gem interprets ClickSend's REST v3 documentation, where that documentation is
-ambiguous, and what the live API actually did. Last reviewed and live-verified 2026-10-05.
+ambiguous, and what the live API actually did. Last reviewed 2026-10-05, including live runs
+that covered sending but did not observe a delivery receipt (see "Live verification").
 
 Sources:
 - [API reference](https://developers.clicksend.com/docs/), with its OpenAPI files at
@@ -32,12 +33,13 @@ Sources:
 These were found by the contract specs (`bundle exec rake contract`), which pin the exact list.
 
 1. **Receipt `status_code` type.** The schema says integer; the examples send the string `"201"`.
-   The gem accepts both.
+   The gem accepts both. Not live-verified: no receipt was observed live (see below).
 2. **Receipt `digits`.** The schema says non-nullable integer; the examples send `null`. Kept in
    `#raw` only, since ClickSend says it applies to voice receipts.
 3. **Send-SMS `date`.** The schema says integer; the example is `"1721099039,"`, a string with a
-   trailing comma. The gem accepts integers and numeric strings. Anything else gives a nil
-   `sent_at`, with the original value kept in `#raw`.
+   trailing comma. **Live: an integer Unix timestamp**, so the schema is right and the example is
+   wrong. The gem accepts integers and numeric strings. Anything else gives a nil `sent_at`, with
+   the original value kept in `#raw`.
 4. **Account `balance_commission`.** The schema says string; the example is a number. **Live: a
    string**, so the schema is right and the example is wrong. Not exposed except through `#raw`.
 5. **Prices.** `total_price` is a number but `message_price` is a string. The gem exposes both
@@ -78,8 +80,10 @@ These were found by the contract specs (`bundle exec rake contract`), which pin 
 ## Live verification (2026-10-05)
 
 The optional live suite ran against a real account using only ClickSend's test number
-`+61411111111` and the invalid number `+000`. No message was queued and no charge was
-incurred: the only price returned was `"0.0000"`. Values below are shapes and types, not data.
+`+61411111111` and the invalid number `+000`. On the first run the account didn't have
+Australia enabled, so no message was queued. A later run, after Australia was enabled, got one
+message accepted (see "Accepted send" below). No charge was incurred in either run. Values
+below are shapes and types, not data.
 
 | Behaviour | Documentation | Live result |
 |---|---|---|
@@ -95,13 +99,33 @@ incurred: the only price returned was `"0.0000"`. Values below are shapes and ty
 | 429 | Documented status only | HTTP 429 with `Retry-After` equal to `ratelimit-reset` (20s and 39s observed), `x-ratelimit-remaining: 0`, and body `{"http_code":429,"response_code":"HTTP_TOO_MANY_REQUESTS","response_msg":"Too many attempts.","data":null}`. The gem maps it to `RateLimitError` with `retry_after` set. |
 | How the limit is counted | Not documented | Inferred from the counters: authenticated, wrong-key and unauthenticated calls to `GET /v3/account` drew from one shared allowance of 20 per roughly 60s, while calls to other endpoints did not reduce it. So the limit appears to be per endpoint and per source address, not per account. |
 
+### Accepted send (2026-10-05)
+
+One message to ClickSend's free test number `+61411111111`, with Australia enabled for the
+account. This was the only send in the run, and retries were off.
+
+| Behaviour | Live result |
+|---|---|
+| Response | HTTP 200, `response_code: "SUCCESS"`; per-message `status: "SUCCESS"` |
+| Counts | `total_count: 1`, `queued_count: 1`, `blocked_count: 0` |
+| Accepted message shape | `direction`, `date`, `to`, `body`, `from`, `schedule`, `message_id`, `message_parts`, `message_price`, `from_email` (null), `list_id` (null), `custom_string`, `contact_id` (null), `user_id`, `subaccount_id`, `is_shared_system_number` (`true`), `country`, `carrier`, `status`. These are exactly the documented fields. |
+| Message ID | 36-character upper-case UUID |
+| `date` | Integer Unix timestamp; `Message#sent_at` parses it |
+| `schedule` | Integer, equal to the send time for an immediate (unscheduled) message, so `Message#scheduled_at` is set even when nothing was scheduled |
+| Price and parts | `message_parts: 0`, `message_price: "0.0000"` (string). `total_price` came back as the JSON **integer** `0` (the gem exposes it as `"0"`) |
+| `custom_string` | Echoed back exactly |
+| Cost | Account balance unchanged before and after the send: no charge |
+| Delivery receipt | **None observed.** `GET /v3/sms/receipts/{message_id}` answered HTTP 404 `NOT_FOUND` ("Receipt record not found.") at about 15s, 30s, 60s and 120s after the send. The unread receipt list stayed empty, although the account has an enabled `POLL` receipt rule. Free test-number messages did not produce receipts during this two-minute observation window. |
+
+Receipt retrieval and parsing are therefore verified against ClickSend's published examples and
+the contract specs only, **not** against a live receipt.
+
 ### Still unverified
 
-These need a successful send (an account with the test number's country enabled), existing
-inbound messages, or the public test accounts:
+These need a receipt for a real (non-test) message, existing inbound messages, or the public
+test accounts:
 
-- [ ] The shape of an accepted (`SUCCESS`) message, including whether `date` is an integer
-- [ ] Receipt shape and `status_code` type (no receipts existed)
+- [ ] A live receipt: its shape and `status_code` type. The free test number produced none.
 - [ ] Inbound timestamp field (`timestamp` or `timestamp_send`); no inbound messages existed
 - [ ] HTTP status and `response_code` for the `nocredit`, `notactive` and `banned` test accounts
 - [ ] Whether mark-read accepts an empty `{}` body. Deliberately not tested, because it would

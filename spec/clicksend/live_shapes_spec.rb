@@ -47,6 +47,34 @@ RSpec.describe "Live-observed response shapes" do
     expect(batch.first.price).to eq("0.0000")
   end
 
+  # An accepted message to a free test number: every documented field, integer date and
+  # schedule (schedule equals the send time for an immediate message), 0 parts, price "0.0000",
+  # and total_price as a JSON integer 0.
+  it "parses an accepted send" do
+    sent = 1_791_208_841
+    accepted = {"direction" => "out", "date" => sent, "to" => "+61411111111", "body" => "verification", "from" => "+61400000000",
+                "schedule" => sent, "message_id" => "7B2D4F60-1A3C-4E5F-9A0B-1C2D3E4F5A6B", "message_parts" => 0, "message_price" => "0.0000",
+                "from_email" => nil, "list_id" => nil, "custom_string" => "verify-ref", "contact_id" => nil, "user_id" => 1,
+                "subaccount_id" => 2, "is_shared_system_number" => true, "country" => "AU", "carrier" => "Optus", "status" => "SUCCESS"}
+    stub_api(:post, "/v3/sms/send").to_return(json_response(envelope(
+      {"total_price" => 0, "total_count" => 1, "queued_count" => 1, "messages" => [accepted],
+       "_currency" => {"currency_name_short" => "AUD"}, "blocked_count" => 0},
+      response_msg: "Messages queued for delivery."
+    )))
+
+    message = client.sms.deliver(to: "+61411111111", body: "verification", custom_string: "verify-ref")
+
+    expect(message).to be_queued
+    expect(message).to have_attributes(
+      status: "SUCCESS", message_id: "7B2D4F60-1A3C-4E5F-9A0B-1C2D3E4F5A6B", parts: 0, price: "0.0000",
+      custom_string: "verify-ref", sent_at: Time.at(sent).utc, scheduled_at: Time.at(sent).utc
+    )
+    expect(message.message_id).to match(Clicksend::Resources::SMS::MESSAGE_ID)
+
+    batch = client.sms.deliver_batch([{to: "+61411111111", body: "verification"}])
+    expect([batch.total_price, batch.queued_count, batch.blocked_count, batch.all_queued?]).to eq(["0", 1, 0, true])
+  end
+
   it "treats an empty list with last_page 0 as a single empty page" do
     stub = stub_api(:get, "/v3/sms/receipts", query: {"limit" => "15"}).to_return(json_response(envelope(
       {"total" => 0, "per_page" => 15, "current_page" => 1, "last_page" => 0, "next_page_url" => nil, "prev_page_url" => nil,

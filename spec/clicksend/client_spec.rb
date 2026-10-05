@@ -84,7 +84,7 @@ RSpec.describe Clicksend::Client do
   describe "#request (escape hatch)" do
     it "calls an arbitrary endpoint with the same auth, headers and parsing" do
       stub = stub_api(:post, "/v3/sms/templates", body: {template_name: "otp", body: "Code {code}"})
-        .with(headers: {"Content-Type" => "application/json", "User-Agent" => %r{\Aclicksend-ruby/1\.0\.0\.rc1 ruby/}})
+        .with(headers: {"Content-Type" => "application/json", "User-Agent" => %r{\Aclicksend-ruby/#{Regexp.escape(Clicksend::VERSION)} ruby/}o})
         .to_return(json_response(envelope({"template_id" => 7})))
 
       response = client.request(:post, "/v3/sms/templates", body: {template_name: "otp", body: "Code {code}"})

@@ -8,6 +8,9 @@ module Clicksend
     # was accepted and queued; anything else (e.g. "INVALID_RECIPIENT",
     # "INSUFFICIENT_CREDIT", "COUNTRY_NOT_ENABLED") means it was not. The HTTP
     # status of the request does not reflect individual messages.
+    #
+    # +scheduled_at+ mirrors ClickSend's +schedule+ field, which ClickSend sets to the send time
+    # for an immediate message, so it is not nil just because nothing was scheduled.
     Message = Data.define(
       :message_id, :status, :to, :from, :body, :parts, :price, :custom_string,
       :list_id, :country, :carrier, :sent_at, :scheduled_at, :raw
