@@ -168,10 +168,13 @@ module Clicksend
       raise ConfigurationError, "base_url is not a valid URL: #{value.inspect}"
     end
 
-    # Only a path on the configured host is accepted: no scheme, no host
-    # ("//evil.example"), nothing URI can't parse.
+    # Only a path on the configured host is accepted: no scheme, no host, no
+    # leading "//" (even "///host", which Faraday keeps on the origin but a
+    # custom transport could resolve as a network-path reference), no
+    # whitespace or control characters, nothing URI can't parse.
     def validate_path!(path)
-      uri = URI.parse(path) if path.is_a?(String) && path.start_with?("/") && !path.match?(/[[:cntrl:] ]/)
+      plain = path.is_a?(String) && path.start_with?("/") && !path.start_with?("//") && !path.match?(/[[:cntrl:] ]/)
+      uri = URI.parse(path) if plain
       return if uri && uri.scheme.nil? && uri.host.nil?
 
       raise ArgumentError, "path must be an absolute path such as \"/v3/account\", not #{path.inspect}"
