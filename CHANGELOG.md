@@ -28,7 +28,8 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
 - Delivery receipts: `client.sms.receipts`, `#receipt`, `#mark_receipts_read`, plus
   `Receipt#delivered?`, `#failed?` and `#pending?`.
 - Replies: `client.sms.inbound`, `#mark_inbound_read` and `#mark_inbound_message_read`.
-- `client.account.fetch` (balance and currency).
+- `client.account.fetch` (balance and currency). The API key that ClickSend echoes in the
+  account payload (`_subaccount.api_key`) is replaced with `"[REDACTED]"` in `Account#raw`.
 - `Clicksend::Page` with lazy `#auto_paging_each`.
 - `client.request` and `client.paginate`, to call any ClickSend endpoint through the same
   authentication, timeouts, retries, errors and parsing. They return `Clicksend::Response`

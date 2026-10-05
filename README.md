@@ -211,10 +211,13 @@ Status codes follow ClickSend's
 account = client.account.fetch
 account.balance   # => "4.998000"
 account.currency  # => "AUD"
-account.raw       # every field ClickSend returned
+account.raw       # every field ClickSend returned (with one exception, below)
 ```
 
 Every model keeps the full payload in `#raw`, so fields this gem doesn't name are still there.
+The one exception is the account response. ClickSend includes the API key there
+(`_subaccount.api_key`), and the gem replaces it with `"[REDACTED]"` so an `Account` is safe to log.
+The raw body from `client.request(:get, "/v3/account")` still contains the key, so don't log it.
 
 ## Pagination
 
@@ -264,9 +267,14 @@ send something twice**:
 
 | Failure | Retried for |
 |---|---|
-| 429 Too Many Requests (honours `Retry-After` up to 30s) | every request: ClickSend did not process it |
+| 429 Too Many Requests (waits for `Retry-After` if it is 30s or less) | every request: ClickSend did not process it |
 | Connection refused, DNS failure, connect timeout | every request: it never reached ClickSend |
 | Read timeout, connection reset, 5xx | idempotent requests only: `GET`s and the gem's mark-read calls |
+
+ClickSend doesn't publish its rate limits. In testing on 2026-10-05, `GET /v3/account` allowed
+20 requests per roughly 60 seconds and answered 429 with `Retry-After` values of 20–39 seconds.
+A wait longer than 30 seconds isn't attempted; you get the `RateLimitError` and its `#retry_after`
+instead.
 
 Two more cases are never retried. An error that ClickSend reports only inside a 2xx
 response body is undocumented behaviour, so nothing is known about whether the request was
@@ -339,8 +347,10 @@ stub_request(:post, "https://rest.clicksend.com/v3/sms/send")
 ```
 
 **Use ClickSend's test numbers.** These include `+61411111111`, `+14055555555` and `+447777777777`;
-see the [full list](https://developers.clicksend.com/docs/testing). Requests to them succeed, but
-nothing is sent or charged.
+see the [full list](https://developers.clicksend.com/docs/testing). Nothing is sent or charged.
+A test number only returns `SUCCESS` if its country is enabled for your account. Otherwise
+ClickSend answers with the per-message status `COUNTRY_NOT_ENABLED`, which `deliver` raises as
+`MessageRejected`.
 
 **Replace the transport.** For tests that shouldn't touch HTTP at all, pass any object that
 responds to `call(method, path, query:, body:, headers:)` and returns a

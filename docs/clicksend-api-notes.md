@@ -1,7 +1,7 @@
 # ClickSend API notes
 
 How this gem interprets ClickSend's REST v3 documentation, where that documentation is
-ambiguous, and what still needs checking against the live API. Last reviewed 2026-10-05.
+ambiguous, and what the live API actually did. Last reviewed and live-verified 2026-10-05.
 
 Sources:
 - [API reference](https://developers.clicksend.com/docs/), with its OpenAPI files at
@@ -24,7 +24,7 @@ Sources:
 | Mark-read cutoff | `date_before`, Unix timestamp, optional | `before:` (Time or Integer); `{}` when omitted, which matches the request schema |
 | Unicode | Detected automatically; no `messagetype` in v3 | Not exposed |
 | URLs in SMS | Paused for new customers pending approval | Documented |
-| Test numbers | e.g. `+61411111111`: "No messages will be sent, and your account won't be charged" | Used by the live specs |
+| Test numbers | e.g. `+61411111111`: "No messages will be sent, and your account won't be charged" | Used by the live specs. **Live:** still subject to the account's enabled countries (see below) |
 | Idempotency | No idempotency key on any send operation | Sends are never retried after timeouts or 5xx |
 
 ## Ambiguities and inconsistencies
@@ -38,8 +38,8 @@ These were found by the contract specs (`bundle exec rake contract`), which pin 
 3. **Send-SMS `date`.** The schema says integer; the example is `"1721099039,"`, a string with a
    trailing comma. The gem accepts integers and numeric strings. Anything else gives a nil
    `sent_at`, with the original value kept in `#raw`.
-4. **Account `balance_commission`.** The schema says string; the example is a number. Not exposed
-   except through `#raw`.
+4. **Account `balance_commission`.** The schema says string; the example is a number. **Live: a
+   string**, so the schema is right and the example is wrong. Not exposed except through `#raw`.
 5. **Prices.** `total_price` is a number but `message_price` is a string. The gem exposes both
    as decimal strings.
 6. **Inbound timestamp field.** The `inbound_sms` schema names it `timestamp`; the list example
@@ -52,13 +52,19 @@ These were found by the contract specs (`bundle exec rake contract`), which pin 
 9. **Batch size.** "Up to 1000 messages" appears only in a code-sample comment, not in the schema.
    Not enforced.
 10. **Blocked messages.** `blocked_count` is documented, but not whether blocked messages also
-    appear in `messages[]`. `Batch#all_queued?` checks both.
+    appear in `messages[]`. **Live: they do** (a `COUNTRY_NOT_ENABLED` message was listed and
+    counted in `blocked_count`). `Batch#all_queued?` checks both.
 11. **Rate limits.** 429 is documented, but the referenced "Rate Limiting" section doesn't exist.
-    Unauthenticated responses carry `x-ratelimit-limit`/`x-ratelimit-remaining`/`retry-after`
-    (observed). The gem honours `Retry-After` and doesn't depend on the other headers.
+    See the live results below for what the API actually sends. The gem honours `Retry-After`
+    and doesn't depend on the other headers.
 12. **Error HTTP statuses.** The docs list application codes such as `INVALID_RECIPIENT` and
-    `INSUFFICIENT_CREDIT` but not which HTTP status accompanies them on single-resource calls.
-    The gem maps by HTTP status and exposes `response_code` either way.
+    `INSUFFICIENT_CREDIT` but not which HTTP status accompanies them. **Live:** on `/sms/send`,
+    `INVALID_RECIPIENT` and `COUNTRY_NOT_ENABLED` are per-message statuses inside an HTTP 200, not
+    request-level errors. The status for `INSUFFICIENT_CREDIT` is still unverified.
+13. **Account payload contains an API key.** ClickSend's example for `GET /v3/account`, and the
+    live response, include `_subaccount.api_key`. `Account#raw` replaces that value with
+    `"[REDACTED]"`. The escape hatch returns bodies verbatim, so `client.request(:get,
+    "/v3/account").body` contains the key and must not be logged.
 
 ## Defensive behaviour (not documented for v3)
 
@@ -69,18 +75,39 @@ These were found by the contract specs (`bundle exec rake contract`), which pin 
 - Duplicate keys in a JSON response are not specially handled. With json 2.x, Ruby warns and
   the last value wins. json 3.x rejects them by default, which surfaces as `MalformedResponseError`.
 
-## Needs live verification
+## Live verification (2026-10-05)
 
-Run the optional live specs (see CONTRIBUTING.md) to settle these:
+The optional live suite ran against a real account using only ClickSend's test number
+`+61411111111` and the invalid number `+000`. No message was queued and no charge was
+incurred: the only price returned was `"0.0000"`. Values below are shapes and types, not data.
 
-- [ ] How an invalid recipient is reported for `/sms/send`: HTTP 200 with a per-message status,
-      or a 4xx for the whole request?
-- [ ] HTTP status and `response_code` for an account without credit (ClickSend's public
-      `nocredit` test account) and for inactive or banned accounts
-- [ ] Rate-limit headers and limits for authenticated requests
-- [ ] Whether `PUT /sms/receipts-read` and `/sms/inbound-read` accept an empty JSON object
-- [ ] Inbound timestamp field name in real responses (`timestamp` or `timestamp_send`)
-- [ ] Whether `message_id` values are always UUID-like. The gem accepts `[A-Za-z0-9-]+` in paths.
+| Behaviour | Documentation | Live result |
+|---|---|---|
+| Invalid recipient, single send | Not stated | HTTP 200, per-message `status: "INVALID_RECIPIENT"`. The message object is minimal: `to`, `body`, `from`, `schedule` (`""`), `message_id`, `custom_string`, `is_shared_system_number`, `status`. No price, parts, date, country or carrier. |
+| Invalid recipient in a batch | Not stated | HTTP 200. Listed in `messages[]` with the same minimal shape. Not counted in `blocked_count`. |
+| ClickSend's test number on an account without that country enabled | "A success response will be returned" | HTTP 200, per-message `status: "COUNTRY_NOT_ENABLED"`, `message_price: "0.0000"`, `message_parts: 0`, and counted in `blocked_count`. Test numbers are subject to the account's enabled countries. |
+| Message ID format | Not stated | 36-character upper-case UUID, assigned even to rejected messages |
+| Authentication failure | 401 | HTTP 401 with `{"http_code":401,"response_code":"UNAUTHORIZED","response_msg":"Authorization failed.","data":null}`, identical on GET, POST and PUT |
+| Mark-read with `{"date_before": 1}` | Optional cutoff | Accepted (HTTP 200) on both `PUT /sms/receipts-read` and `PUT /sms/inbound-read` |
+| Empty list | `last_page` example shows 1 | `total: 0, current_page: 1, last_page: 0`. `Page` treats it as one empty page. |
+| Account payload | Documented fields | Matches the documented fields, plus `ai_enabled` (integer), and a populated `_subaccount` that includes `api_key` (now redacted by the gem) |
+| Rate-limit headers | No numbers documented | `x-ratelimit-limit: 20`, `x-ratelimit-remaining`, `ratelimit-reset` (seconds) on 200 and 401 responses from `GET /v3/account` |
+| 429 | Documented status only | HTTP 429 with `Retry-After` equal to `ratelimit-reset` (20s and 39s observed), `x-ratelimit-remaining: 0`, and body `{"http_code":429,"response_code":"HTTP_TOO_MANY_REQUESTS","response_msg":"Too many attempts.","data":null}`. The gem maps it to `RateLimitError` with `retry_after` set. |
+| How the limit is counted | Not documented | Inferred from the counters: authenticated, wrong-key and unauthenticated calls to `GET /v3/account` drew from one shared allowance of 20 per roughly 60s, while calls to other endpoints did not reduce it. So the limit appears to be per endpoint and per source address, not per account. |
+
+### Still unverified
+
+These need a successful send (an account with the test number's country enabled), existing
+inbound messages, or the public test accounts:
+
+- [ ] The shape of an accepted (`SUCCESS`) message, including whether `date` is an integer
+- [ ] Receipt shape and `status_code` type (no receipts existed)
+- [ ] Inbound timestamp field (`timestamp` or `timestamp_send`); no inbound messages existed
+- [ ] HTTP status and `response_code` for the `nocredit`, `notactive` and `banned` test accounts
+- [ ] Whether mark-read accepts an empty `{}` body. Deliberately not tested, because it would
+      mark every unread item read. The gem sends `{}` when `before:` is omitted; the request
+      schema allows it.
+- [ ] Rate limits for endpoints other than `GET /v3/account`
 
 ## Retry safety: the rules and why
 
