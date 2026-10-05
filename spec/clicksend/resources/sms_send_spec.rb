@@ -89,7 +89,7 @@ RSpec.describe Clicksend::Resources::SMS, "sending" do
       expect { client.sms.deliver(body: "hi") }.to raise_error(ArgumentError, /missing keyword: :to/)
       expect { client.sms.deliver(to: "+61411111111", body: nil) }.to raise_error(ArgumentError, /body must be a String/)
       expect { client.sms.deliver(to: 61_411_111_111, body: "hi") }.to raise_error(ArgumentError, /to must be a String/)
-      expect { client.sms.deliver(to: "+61411111111", body: "hi", schedule: "tomorrow") }.to raise_error(ArgumentError, /schedule/)
+      expect { client.sms.deliver(to: "+61411111111", body: "hi", schedule: "tomorrow") }.to raise_error(ArgumentError, /message: expected a Time or Unix timestamp, got "tomorrow"/)
       expect { client.sms.deliver(to: "+61411111111", body: "hi", sender: "x") }.to raise_error(ArgumentError, /unknown keyword: :sender/)
       expect(a_request(:any, /clicksend/)).not_to have_been_made
     end

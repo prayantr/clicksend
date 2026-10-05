@@ -10,6 +10,7 @@ module Clicksend
         to list_id body from source schedule custom_string country from_email exclude_no_sender_id_recipients
       ].freeze
       DEFAULT_FIELDS = (MESSAGE_FIELDS - %i[to list_id body]).freeze
+      MESSAGE_ID = /\A[A-Za-z0-9-]+\z/
 
       def initialize(client)
         @client = client
@@ -89,11 +90,76 @@ module Clicksend
         submit(normalized, shorten_urls)
       end
 
+      # Unread delivery receipts (GET /v3/sms/receipts).
+      #
+      # Requires an SMS receipt rule with the POLL action in your ClickSend
+      # account. Only receipts not yet marked as read are listed, so marking
+      # receipts read while paging shifts later pages: process, then call
+      # #mark_receipts_read(before:).
+      #
+      #   client.sms.receipts.auto_paging_each { |receipt| track(receipt) if receipt.delivered? }
+      #
+      # @return [Clicksend::Page<Clicksend::SMS::Receipt>]
+      def receipts(page: nil, limit: nil)
+        Page.fetch(@client, "/v3/sms/receipts", page: page, limit: limit) { |item| Clicksend::SMS::Receipt.from_api(item) }
+      end
+
+      # One delivery receipt, read or not (GET /v3/sms/receipts/{message_id}).
+      # @return [Clicksend::SMS::Receipt]
+      def receipt(message_id)
+        Clicksend::SMS::Receipt.from_api(@client.request(:get, "/v3/sms/receipts/#{message_id!(message_id)}").data)
+      end
+
+      # Marks delivery receipts as read (PUT /v3/sms/receipts-read): all of
+      # them, or only those before +before+.
+      # @param before [Time, Integer, nil]
+      # @return [nil]
+      def mark_receipts_read(before: nil)
+        @client.request(:put, "/v3/sms/receipts-read", body: date_before(before), idempotent: true)
+        nil
+      end
+
+      # Unread inbound SMS, i.e. replies (GET /v3/sms/inbound).
+      #
+      # Requires an SMS inbound rule with the POLL action. As with receipts,
+      # only unread messages are listed.
+      #
+      # @return [Clicksend::Page<Clicksend::SMS::InboundMessage>]
+      def inbound(page: nil, limit: nil)
+        Page.fetch(@client, "/v3/sms/inbound", page: page, limit: limit) { |item| Clicksend::SMS::InboundMessage.from_api(item) }
+      end
+
+      # Marks inbound SMS as read (PUT /v3/sms/inbound-read): all of them, or
+      # only those before +before+.
+      # @return [nil]
+      def mark_inbound_read(before: nil)
+        @client.request(:put, "/v3/sms/inbound-read", body: date_before(before), idempotent: true)
+        nil
+      end
+
+      # Marks one inbound SMS as read (PUT /v3/sms/inbound-read/{message_id}).
+      # @return [nil]
+      def mark_inbound_message_read(message_id)
+        @client.request(:put, "/v3/sms/inbound-read/#{message_id!(message_id)}", idempotent: true)
+        nil
+      end
+
       def inspect
         "#<#{self.class.name}>"
       end
 
       private
+
+      # Message IDs are interpolated into paths, so only ID characters are allowed.
+      def message_id!(value)
+        return value if value.is_a?(String) && value.match?(MESSAGE_ID)
+
+        raise ArgumentError, "message_id must be a ClickSend message ID such as \"31BC271B-1E0C-45F6-9E7E-97186C46BB82\", got #{value.inspect}"
+      end
+
+      def date_before(before)
+        before.nil? ? {} : {date_before: unix_time(before, "before")}
+      end
 
       def submit(messages, shorten_urls)
         body = {messages: messages}
@@ -123,9 +189,11 @@ module Clicksend
         when Integer then value
         when Time then value.to_i
         else
-          return value.to_time.to_i if value.respond_to?(:to_time)
+          # Date/DateTime/ActiveSupport::TimeWithZone; Strings are rejected even
+          # if ActiveSupport makes them respond to #to_time.
+          return value.to_time.to_i if value.respond_to?(:to_time) && !value.is_a?(String)
 
-          raise ArgumentError, "#{label}: schedule must be a Time or Unix timestamp"
+          raise ArgumentError, "#{label}: expected a Time or Unix timestamp, got #{value.inspect}"
         end
       end
     end

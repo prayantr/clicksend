@@ -12,6 +12,8 @@ require_relative "clicksend/account"
 require_relative "clicksend/resources/account"
 require_relative "clicksend/sms/message"
 require_relative "clicksend/sms/batch"
+require_relative "clicksend/sms/receipt"
+require_relative "clicksend/sms/inbound_message"
 require_relative "clicksend/resources/sms"
 require_relative "clicksend/client"
 
