@@ -64,8 +64,17 @@ How they differ for the messaging core:
 
 Requires Ruby 3.3 or newer.
 
+`1.0.0.rc1` is not on RubyGems yet; RubyGems still serves the 2014 release, 0.0.3.
+Until 1.0 is released, install from GitHub:
+
 ```ruby
 # Gemfile
+gem "clicksend", github: "prayantr/clicksend"
+```
+
+Once 1.0 is released:
+
+```ruby
 gem "clicksend", "~> 1.0"
 ```
 
