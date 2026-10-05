@@ -4,13 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-10-05
 
 No changes to the library's behaviour or public API since 1.0.0.rc1.
 
 ### Changed
 
-- README: installation instructions for the published `1.0.0.rc1` prerelease.
+- README: installation instructions for the stable release.
 - Documented that `SMS::Message#scheduled_at` mirrors ClickSend's `schedule` field, which
   ClickSend sets to the send time for an immediate message.
 
@@ -72,6 +72,6 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
 - Last release of the original gem: send SMS, poll replies and delivery reports, and check
   the balance through ClickSend's v2 API.
 
-[1.0.0]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...HEAD
+[1.0.0]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...v1.0.0
 [1.0.0.rc1]: https://github.com/prayantr/clicksend/compare/c99edc5...v1.0.0.rc1
 [0.0.3]: https://github.com/prayantr/clicksend/tree/c99edc5
