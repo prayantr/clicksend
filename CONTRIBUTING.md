@@ -42,6 +42,26 @@ the repository's GitHub `live` environment secrets.
 
 ## Releasing (maintainers)
 
-1. Update `lib/clicksend/version.rb` and `CHANGELOG.md` in a pull request.
-2. After merging, run the **Release** workflow manually. It publishes with RubyGems Trusted
-   Publishing and tags the release.
+Releases are published to RubyGems by the **Release** workflow using Trusted Publishing (OIDC).
+No RubyGems API key is stored anywhere.
+
+1. In a pull request, bump `lib/clicksend/version.rb`, refresh `Gemfile.lock`, and date the
+   `CHANGELOG.md` entry. Merge it into `master` once CI and Contract are green.
+2. Create an annotated tag on that `master` commit:
+   ```sh
+   git tag -a vX.Y.Z -m "clicksend X.Y.Z" <master-commit-sha>
+   ```
+3. Push only that tag:
+   ```sh
+   git push origin refs/tags/vX.Y.Z
+   ```
+4. Run the Release workflow **from the tag**. In the Actions UI, choose "Use workflow from →
+   Tags → vX.Y.Z", or run:
+   ```sh
+   gh workflow run release.yml --ref vX.Y.Z
+   ```
+   The `rubygems` environment only accepts runs from `v*` tags.
+5. The workflow runs the specs, builds the gem and publishes it to RubyGems through Trusted
+   Publishing.
+6. The workflow does not create or push the tag. Bundler's `rake release` finds the existing
+   tag and skips tagging.

@@ -1,9 +1,12 @@
-# Publishes the gem with RubyGems Trusted Publishing (OIDC, no stored API
-# key). Manual only, gated by the "rubygems" environment. Requires a trusted
-# publisher to be configured for this repository on rubygems.org first.
+# Publishes the gem to RubyGems with Trusted Publishing (OIDC, no stored API
+# key). Manual only, and gated by the "rubygems" environment, which accepts
+# runs from v* tags only. The trusted publisher is configured on rubygems.org
+# for this repository, this workflow file and that environment.
 #
-# Run it only after the version and CHANGELOG are committed on master:
-# `rake release` tags vX.Y.Z, pushes the tag and pushes the gem.
+# Release process (see CONTRIBUTING.md): merge the version bump into master,
+# push an annotated vX.Y.Z tag on that commit, then run this workflow from the
+# tag. `rake release` finds the existing tag, so it skips tagging and only
+# builds and pushes the gem. This workflow never creates or pushes tags.
 name: Release
 
 on:
