@@ -133,3 +133,64 @@ RSpec.describe Clicksend::Connection do
     end
   end
 end
+
+RSpec.describe Clicksend::Connection, "retries" do
+  let(:ok) { FakeTransport.json(200, {"http_code" => 200, "response_code" => "SUCCESS", "data" => {}}) }
+  let(:logger) { instance_double(Logger, info: nil, warn: nil) }
+
+  before { allow(Kernel).to receive(:sleep) }
+
+  def connection(*outcomes)
+    @transport = FakeTransport.new(*outcomes)
+    described_class.new(transport: @transport, retry_policy: Clicksend::RetryPolicy.new(max_retries: 2), logger: logger)
+  end
+
+  it "retries an idempotent GET after a 5xx and returns the eventual success" do
+    response = connection(FakeTransport.json(503, ""), ok).request(:get, "/v3/x", idempotent: true)
+    expect(response.status).to eq(200)
+    expect(@transport.calls.size).to eq(2)
+    expect(Kernel).to have_received(:sleep).once
+    expect(logger).to have_received(:warn).with(%r{GET /v3/x failed \(Clicksend::ServerError\), retrying in \d\.\d\ds \(retry 1 of 2\)})
+  end
+
+  it "attempts a non-idempotent POST exactly once when it times out" do
+    conn = connection(Clicksend::TimeoutError.new("read timeout"), ok)
+    expect { conn.request(:post, "/v3/sms/send", body: {}) }.to raise_error(Clicksend::TimeoutError)
+    expect(@transport.calls.size).to eq(1)
+    expect(Kernel).not_to have_received(:sleep)
+  end
+
+  it "attempts a non-idempotent POST exactly once on a 5xx" do
+    expect { connection(FakeTransport.json(500, ""), ok).request(:post, "/v3/sms/send", body: {}) }
+      .to raise_error(Clicksend::ServerError)
+    expect(@transport.calls.size).to eq(1)
+  end
+
+  it "retries a POST that was rate limited, waiting for Retry-After" do
+    limited = FakeTransport.json(429, {"response_code" => "HTTP_TOO_MANY_REQUESTS"}, headers: {"retry-after" => "1"})
+    connection(limited, ok).request(:post, "/v3/sms/send", body: {})
+    expect(@transport.calls.size).to eq(2)
+    expect(Kernel).to have_received(:sleep).with(1)
+  end
+
+  it "retries a POST whose connection was refused (never sent)" do
+    connection(Clicksend::ConnectionError.new("refused", request_sent: false), ok).request(:post, "/v3/sms/send", body: {})
+    expect(@transport.calls.size).to eq(2)
+  end
+
+  it "retries a POST marked idempotent after a timeout" do
+    connection(Clicksend::TimeoutError.new("read"), ok).request(:post, "/v3/sms/price", body: {}, idempotent: true)
+    expect(@transport.calls.size).to eq(2)
+  end
+
+  it "raises the last error once retries are exhausted" do
+    conn = connection(FakeTransport.json(503, ""), FakeTransport.json(502, ""), FakeTransport.json(504, ""), ok)
+    expect { conn.request(:get, "/v3/x", idempotent: true) }.to raise_error(Clicksend::ServerError) { |e| expect(e.http_status).to eq(504) }
+    expect(@transport.calls.size).to eq(3)
+  end
+
+  it "re-sends the identical request on retry" do
+    connection(FakeTransport.json(429, ""), ok).request(:post, "/v3/sms/send", query: {a: 1}, body: {b: 2})
+    expect(@transport.calls.map(&:to_h).uniq.size).to eq(1)
+  end
+end
