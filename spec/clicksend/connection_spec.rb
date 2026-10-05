@@ -26,7 +26,7 @@ RSpec.describe Clicksend::Connection do
   describe "successful responses" do
     it "returns a Response exposing the envelope" do
       response = connection(FakeTransport.json(200, envelope)).request(:get, "/v3/x")
-      expect(response.status).to eq(200)
+      expect(response.http_status).to eq(200)
       expect(response.data).to eq("a" => 1)
       expect(response.response_code).to eq("SUCCESS")
       expect(response.response_msg).to eq("OK")
@@ -147,7 +147,7 @@ RSpec.describe Clicksend::Connection, "retries" do
 
   it "retries an idempotent GET after a 5xx and returns the eventual success" do
     response = connection(FakeTransport.json(503, ""), ok).request(:get, "/v3/x", idempotent: true)
-    expect(response.status).to eq(200)
+    expect(response.http_status).to eq(200)
     expect(@transport.calls.size).to eq(2)
     expect(Kernel).to have_received(:sleep).once
     expect(logger).to have_received(:warn).with(%r{GET /v3/x failed \(Clicksend::ServerError\), retrying in \d\.\d\ds \(retry 1 of 2\)})

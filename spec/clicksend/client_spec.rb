@@ -107,7 +107,7 @@ RSpec.describe Clicksend::Client do
 
     it "accepts string methods" do
       stub_api(:delete, "/v3/sms/templates/1").to_return(json_response(envelope(nil)))
-      expect(client.request("DELETE", "/v3/sms/templates/1").status).to eq(200)
+      expect(client.request("DELETE", "/v3/sms/templates/1").http_status).to eq(200)
     end
 
     it "rejects unsupported methods, malformed paths and full URLs" do

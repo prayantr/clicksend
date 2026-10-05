@@ -9,7 +9,7 @@ module Clicksend
   #   {"http_code": 200, "response_code": "SUCCESS", "response_msg": "...", "data": {...}}
   #
   # The envelope readers return nil when the body doesn't follow that shape.
-  Response = Data.define(:status, :headers, :body) do
+  Response = Data.define(:http_status, :headers, :body) do
     # The envelope's +data+ member.
     def data
       envelope("data")
@@ -26,7 +26,7 @@ module Clicksend
     end
 
     def inspect
-      "#<#{self.class.name} status=#{status} response_code=#{response_code.inspect}>"
+      "#<#{self.class.name} http_status=#{http_status} response_code=#{response_code.inspect}>"
     end
 
     private

@@ -281,7 +281,7 @@ the same request path: same authentication, timeouts, retry rules, errors and pa
 response = client.request(:post, "/v3/sms/price", body: {messages: [{to: "+61411111111", body: "Hi"}]}, idempotent: true)
 response.data           # the envelope's "data" (frozen Hash/Array)
 response.response_code  # => "SUCCESS"
-response.status; response.headers; response.body
+response.http_status; response.headers; response.body
 
 client.request(:put, "/v3/sms/#{message_id}/cancel")
 client.request(:get, "/v3/sms/templates", query: {page: 2})

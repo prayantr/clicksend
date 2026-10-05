@@ -77,7 +77,7 @@ RSpec.describe "SMS send safety (real HTTP stack)" do
 
   it "does retry an idempotent GET through the same path (so the policy is active, not just absent)" do
     serve(:unavailable, :unavailable, :ok)
-    expect(local_client.request(:get, "/v3/account").status).to eq(200)
+    expect(local_client.request(:get, "/v3/account").http_status).to eq(200)
     expect(@server.requests.size).to eq(3)
   end
 

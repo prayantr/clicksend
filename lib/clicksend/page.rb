@@ -19,7 +19,8 @@ module Clicksend
 
     attr_reader :items, :total, :per_page, :current_page, :last_page
 
-    # Fetches one page. Internal: use Client#paginate or a resource method.
+    # Fetches one page.
+    # @api private Use Client#paginate or a resource method.
     #
     # @yieldparam item [Hash] a raw item, to be converted into a model
     def self.fetch(client, path, query: {}, page: nil, limit: nil, &build_item)
@@ -39,18 +40,19 @@ module Clicksend
     def self.from_response(response, fetch_page, &build_item)
       data = response.data
       unless data.is_a?(Hash) && data["data"].is_a?(Array)
-        raise MalformedResponseError.new("Expected a paginated response with a data list", http_status: response.status, body: response.body)
+        raise MalformedResponseError.new("Expected a paginated response with a data list", http_status: response.http_status, body: response.body)
       end
 
       numbers = %w[total per_page current_page last_page].to_h do |key|
         value = Integer(data[key], exception: false) if data[key].is_a?(Integer) || data[key].is_a?(String)
-        raise MalformedResponseError.new("Paginated response is missing #{key}", http_status: response.status, body: response.body) if value.nil?
+        raise MalformedResponseError.new("Paginated response is missing #{key}", http_status: response.http_status, body: response.body) if value.nil?
 
         [key.to_sym, value]
       end
       items = data["data"].map { |item| build_item ? build_item.call(item) : item }
       new(items: items.freeze, **numbers, fetch_page: fetch_page)
     end
+    private_class_method :from_response
 
     def initialize(items:, total:, per_page:, current_page:, last_page:, fetch_page:)
       @items = items

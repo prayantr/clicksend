@@ -7,7 +7,7 @@ module Clicksend
   # the response envelope, maps failures to Clicksend errors, retries when the
   # retry policy says it is safe, and logs a one-line summary per attempt.
   #
-  # Internal: use Client#request instead.
+  # @api private Use Client#request instead.
   class Connection
     HTTP_METHODS = %i[get post put patch delete].freeze
 
@@ -77,7 +77,7 @@ module Clicksend
     def interpret(raw)
       body = parse_body(raw)
       status = effective_status(raw.status, body)
-      return Response.new(status: raw.status, headers: raw.headers, body: body) if success?(status)
+      return Response.new(http_status: raw.status, headers: raw.headers, body: body) if success?(status)
 
       # An error reported only inside a 2xx body is undocumented for v3, so
       # nothing is known about whether ClickSend acted on the request: never

@@ -117,7 +117,10 @@ RSpec.describe Clicksend::Resources::SMS, "sending" do
       expect(batch.all_queued?).to be(true)
       expect(batch.messages.last.list_id).to eq("428")
       expect(batch.currency).to eq("AUD")
-      expect(batch.each.map(&:to)).to eq(%w[+61411111111 +61422222222 +61433333333])
+      expect(batch.map(&:to)).to eq(%w[+61411111111 +61422222222 +61433333333])
+      expect(batch.count(&:queued?)).to eq(3)
+      expect(batch.each).to be_an(Enumerator)
+      expect(batch.to_h.keys).to eq(%i[messages total_price total_count queued_count blocked_count currency raw])
     end
 
     it "reports partial failures without raising" do

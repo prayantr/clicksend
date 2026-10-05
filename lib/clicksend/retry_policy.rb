@@ -2,6 +2,7 @@
 
 module Clicksend
   # Decides whether a failed attempt may be retried, and after how long.
+  # @api private Configure it through Client.new(max_retries:).
   #
   # ClickSend's send endpoints accept no idempotency key, so retrying a send
   # that may already have reached ClickSend could deliver the message twice.

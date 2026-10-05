@@ -6,8 +6,14 @@ module Clicksend
     #
     # A batch request succeeds at the HTTP level even when some (or all)
     # messages are not accepted, so always check #rejected / #all_queued?.
+    #
+    # A Batch is Enumerable over its messages (batch.map(&:message_id)).
     Batch = Data.define(:messages, :total_price, :total_count, :queued_count, :blocked_count, :currency, :raw) do
       include Model::Inspect
+      include Enumerable
+
+      # Enumerable#to_h would shadow Data#to_h (members => values); keep Data's.
+      define_method(:to_h, Data.instance_method(:to_h))
 
       def self.from_api(payload)
         payload = Model.payload!(payload, "send result")
