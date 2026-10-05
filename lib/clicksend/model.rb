@@ -10,6 +10,9 @@ module Clicksend
   # integer but shown as "201"); a value that cannot be coerced becomes nil
   # and stays visible in +raw+.
   module Model
+    # Replaces credential values that ClickSend echoes back in payloads.
+    REDACTED = "[REDACTED]"
+
     module_function
 
     def payload!(value, what)

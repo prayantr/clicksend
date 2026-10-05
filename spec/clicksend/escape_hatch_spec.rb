@@ -34,9 +34,12 @@ RSpec.describe "Client#request escape hatch" do
       # (spec/integration/send_safety_spec.rb shows the read timeout firing for client.request)
     end
 
-    it "parses responses identically" do
+    it "parses responses identically (apart from the account model's API-key redaction)" do
       stub_api(:get, "/v3/account").to_return(json_response(account_payload))
-      expect(client.request(:get, "/v3/account").data).to eq(client.account.fetch.raw)
+      raw = client.request(:get, "/v3/account").data
+      modelled = client.account.fetch.raw
+      redact = ->(data) { data.merge("_subaccount" => data["_subaccount"].merge("api_key" => "[REDACTED]")) }
+      expect(modelled).to eq(redact.call(raw))
       expect(client.request(:get, "/v3/account").body).to be_frozen
     end
 
