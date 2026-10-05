@@ -14,7 +14,7 @@ namespace :contract do
 
   desc "Run contract specs against ClickSend's published OpenAPI files (needs network)"
   task run: :fetch do
-    sh({"CLICKSEND_CONTRACT" => "1"}, "bundle exec rspec --tag contract")
+    sh({"CLICKSEND_CONTRACT" => "1", "COVERAGE" => "0"}, "bundle exec rspec --tag contract")
   end
 end
 
