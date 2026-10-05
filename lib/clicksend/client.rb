@@ -23,6 +23,9 @@ module Clicksend
     # @return [Clicksend::Resources::Account]
     attr_reader :account
 
+    # @return [Clicksend::Resources::SMS]
+    attr_reader :sms
+
     # @param username [String] API username (default: ENV["CLICKSEND_USERNAME"])
     # @param api_key [String] API key (default: ENV["CLICKSEND_API_KEY"])
     # @param base_url [String] ClickSend API origin; HTTPS only (plain HTTP is
@@ -75,6 +78,7 @@ module Clicksend
         logger: logger
       )
       @account = Resources::Account.new(self)
+      @sms = Resources::SMS.new(self)
       freeze
     end
 
