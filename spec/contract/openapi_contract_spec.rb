@@ -16,8 +16,18 @@ module OpenAPIContract
     ["messaging/sms.yaml", "put", "/v3/sms/receipts-read", []],
     ["messaging/sms.yaml", "get", "/v3/sms/inbound", %w[page limit]],
     ["messaging/sms.yaml", "put", "/v3/sms/inbound-read", []],
-    ["messaging/sms.yaml", "put", "/v3/sms/inbound-read/{message_id}", []]
+    ["messaging/sms.yaml", "put", "/v3/sms/inbound-read/{message_id}", []],
+    ["messaging/sms.yaml", "get", "/v3/sms/history", %w[page limit q order_by date_from date_to]]
   ].freeze
+
+  # Fields SMS::HistoryRecord reads from a history row.
+  HISTORY_FIELDS = %w[
+    message_id direction status status_code status_text error_code error_text to from body message_parts
+    message_price custom_string list_id country carrier date schedule
+  ].freeze
+
+  # The q=field:value fields sms.history lets callers filter on.
+  HISTORY_FILTERS = %w[to from status message_id].freeze
 
   # Places where ClickSend's own examples contradict its own schemas. The gem
   # tolerates both forms (see Clicksend::Model). This list must match exactly,
@@ -56,6 +66,32 @@ RSpec.describe "ClickSend OpenAPI contract", :contract do
         declared = (op["parameters"] || []).select { |param| param["in"] == "query" }.map { |param| param["name"] }
         expect(query_params - declared).to eq([])
       end
+    end
+  end
+
+  describe "SMS history" do
+    let(:history_op) { operation("messaging/sms.yaml", "get", "/v3/sms/history") }
+
+    it "documents every field SMS::HistoryRecord reads" do
+      item = OpenAPIFixtures.response_schema(OpenAPIFixtures.document("messaging/sms.yaml"), "/v3/sms/history", "get")
+        .dig("properties", "data", "allOf", 1, "properties", "data", "items", "properties")
+      expect(OpenAPIContract::HISTORY_FIELDS - item.keys).to eq([])
+    end
+
+    it "documents each q filter sms.history offers, and still not custom_string" do
+      q = history_op["parameters"].find { |param| param["name"] == "q" }["description"]
+      OpenAPIContract::HISTORY_FILTERS.each { |field| expect(q).to match(/_#{field}_/i), "q no longer documents #{field}" }
+      expect(q).not_to match(/custom_string/), "ClickSend now documents custom_string as a filter: offer it in sms.history"
+    end
+
+    it "documents date ordering in the form sms.history sends" do
+      order_by = history_op["parameters"].find { |param| param["name"] == "order_by" }
+      expect(order_by.dig("schema", "default")).to eq("date:asc")
+    end
+
+    it "keeps the documented page-size range Page enforces" do
+      limit = history_op["parameters"].find { |param| param["name"] == "limit" }["schema"]
+      expect([limit["minimum"], limit["maximum"]]).to eq([Clicksend::Page::LIMITS.min, Clicksend::Page::LIMITS.max])
     end
   end
 
