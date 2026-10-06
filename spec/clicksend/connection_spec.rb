@@ -487,9 +487,8 @@ RSpec.describe Clicksend::Connection, "pre-release review" do
     expect(outcome).to be_a(Clicksend::Response).or(satisfy { |e| e.is_a?(Clicksend::MalformedResponseError) && e.ambiguous? })
 
     bad_headers = Clicksend::Transport::Response.new(status: 429, headers: nil, body: "")
-    # A 429 is not processed; the policy can't read Retry-After from nil headers, so retrying stops cleanly.
-    expect { connection(bad_headers).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::RateLimitError) { |e| expect(e).not_to be_ambiguous }
-    expect(@transport.calls.size).to eq(1)
+    # A 429 is not processed; with nil headers there is no Retry-After, so the policy backs off and retries.
+    expect(connection(bad_headers, FakeTransport.json(200, {})).request(:post, "/v3/sms/send").request.attempts).to eq(2)
 
     no_body = Clicksend::Transport::Response.new(status: 200, headers: {}, body: nil)
     expect { connection(no_body).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::MalformedResponseError) { |e|

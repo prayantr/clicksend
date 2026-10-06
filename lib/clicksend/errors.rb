@@ -168,17 +168,21 @@ module Clicksend
   # served", so it is treated as not processed (an inference, not a documented
   # guarantee).
   class RateLimitError < ClientError
-    # Seconds to wait before retrying, from the Retry-After header, if any.
+    # Seconds to wait before retrying, from the Retry-After header: a plain
+    # non-negative decimal Integer, or the time left until its HTTP-date (0
+    # if that has passed). Nil when the header is missing or is anything
+    # else ("+5", "-5", "0x10", "1_0", an Array, ...).
     def retry_after
-      value = headers["retry-after"]
-      return if value.nil?
+      value = headers["retry-after"] if headers.is_a?(Hash)
+      value = value.to_s if value.is_a?(Integer) # from a custom transport
+      return unless value.is_a?(String)
 
-      Integer(value, exception: false)&.then { |seconds| [seconds, 0].max } ||
-        begin
-          [Time.httpdate(value) - Time.now, 0].max
-        rescue ArgumentError
-          nil
-        end
+      text = value.strip
+      return Integer(text, 10) if text.match?(/\A\d+\z/)
+
+      [Time.httpdate(text) - Time.now, 0].max
+    rescue ArgumentError, RangeError # not an HTTP-date, or not valid in its encoding
+      nil
     end
 
     def retryable?

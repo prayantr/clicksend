@@ -53,6 +53,11 @@ Planned as 1.2.0. Additive.
   ambiguous instead of being retried. Such a body is now treated like any other non-JSON body: an
   error status keeps the raw body and its usual error class and retry rule; a 2xx is still a
   `MalformedResponseError` (ambiguous for a send). Bodies labelled `utf-8` were already handled.
+- **`RateLimitError#retry_after` accepts only what RFC 9110 allows**: plain non-negative decimal
+  seconds or an HTTP-date. It used Ruby's `Integer()`, so `"0x10"` meant 16 seconds, `"1_0"` 10 and
+  `"+5"` 5; those, `"-5"` (before: 0) and non-String values are now nil, and the retry policy backs
+  off as for a missing header. It no longer raises for `nil` headers or an Array value from a
+  custom transport, so such a 429 is retried with backoff instead of being raised at once.
 
 ### Changed
 
