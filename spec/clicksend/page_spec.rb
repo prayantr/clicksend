@@ -83,6 +83,31 @@ RSpec.describe Clicksend::Page do
     expect { client.paginate("/v3/other") }.to raise_error(Clicksend::MalformedResponseError, /per_page/)
   end
 
+  it "raises MalformedResponseError, with the request, for page numbers no page can have" do
+    [["current_page", -1], ["current_page", 0], ["last_page", -1], ["total", -5], ["per_page", "-15"]].each do |key, value|
+      payload = page_payload(1, 3, [{"id" => 1}])
+      payload["data"][key] = value
+      stub_api(:get, "/v3/things", query: {}).to_return(json_response(payload))
+      expect { client.paginate("/v3/things") }.to raise_error(Clicksend::MalformedResponseError, "Paginated response has an invalid #{key}: #{Integer(value)} (GET /v3/things)") { |e|
+        expect(e.request).to have_attributes(http_method: :get, path: "/v3/things")
+      }
+    end
+  end
+
+  it "never turns a negative current_page into an ArgumentError when walking pages" do
+    payload = page_payload(-1, 3, [{"id" => 1}])
+    stub_api(:get, "/v3/things", query: {}).to_return(json_response(payload))
+    expect { client.paginate("/v3/things").auto_paging_each.to_a }.to raise_error(Clicksend::MalformedResponseError, /current_page/)
+  end
+
+  it "accepts a nil query, and rejects any other non-Hash query with a clear ArgumentError" do
+    stub_page(1, 1, [{"id" => 1}])
+    expect(client.paginate("/v3/things", query: nil, page: 1).to_a).to eq([{"id" => 1}])
+    ["q=x", [["q", "x"]], 1].each do |query|
+      expect { client.paginate("/v3/things", query: query) }.to raise_error(ArgumentError, "query must be a Hash")
+    end
+  end
+
   it "is frozen and has a compact inspect" do
     stub_page(1, 1, [{"id" => 1}])
     page = client.paginate("/v3/things", page: 1)

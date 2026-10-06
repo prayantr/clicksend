@@ -29,6 +29,13 @@ RSpec.describe Clicksend::Testing::FakeAPI do
       expect(events).to eq(["request.clicksend"])
     end
 
+    it "rejects max_retries: with retry_policy:, like Client.new, rather than ignoring one" do
+      policy = Clicksend::RetryPolicy.new(max_retries: 5)
+      expect { fake.client(max_retries: 0, retry_policy: policy) }.to raise_error(Clicksend::ConfigurationError, "pass max_retries: or retry_policy:, not both")
+      expect(fake.client(retry_policy: policy).retry_policy).to be(policy)
+      expect(fake.client(max_retries: nil).retry_policy).to have_attributes(max_retries: 2, base_delay: 0)
+    end
+
     it "also works as a transport passed to Client.new" do
       client = Clicksend::Client.new(username: "u", api_key: "k", transport: fake, max_retries: 0)
 

@@ -71,6 +71,21 @@ module Clicksend
         }.freeze
       end
 
+      # A GET /v3/sms/history row for a message the fake accepted, in the shape
+      # observed live: no gateway code or text, +schedule+ a String.
+      def history_row(sent, status, price)
+        parts = parts(sent.body)
+        {
+          "direction" => "out", "date" => sent.sent_at.to_i, "to" => sent.to, "body" => sent.body, "status" => status,
+          "from" => sent.from, "schedule" => (sent.scheduled_at || sent.sent_at).to_i.to_s, "status_code" => nil,
+          "status_text" => nil, "error_code" => nil, "error_text" => nil, "message_id" => sent.message_id,
+          "message_parts" => parts, "message_price" => format("%.4f", Rational(price) * parts), "from_email" => nil,
+          "list_id" => sent.list_id, "custom_string" => sent.custom_string || "", "contact_id" => nil, "user_id" => USER_ID,
+          "subaccount_id" => SUBACCOUNT_ID, "country" => sent.country, "carrier" => "", "first_name" => nil,
+          "last_name" => nil, "_api_username" => "test"
+        }.freeze
+      end
+
       # The minimal shape ClickSend returns for a message it did not accept.
       def rejected(message, id, status)
         {

@@ -29,7 +29,8 @@ module Clicksend
     # @param max_delay [Numeric] seconds; the backoff ceiling never exceeds it
     # @param max_retry_after [Numeric] longest Retry-After (seconds) worth
     #   waiting for; a longer one is raised as RateLimitError instead of
-    #   blocking the caller
+    #   blocking the caller. Even with Float::INFINITY, a wait longer than
+    #   Kernel.sleep accepts (2**31 - 1 seconds) is raised, not retried.
     def initialize(max_retries: 2, base_delay: 0.5, max_delay: 8.0, max_retry_after: 30, random: Random)
       unless max_retries.is_a?(Integer) && max_retries >= 0
         raise ConfigurationError, "max_retries must be a non-negative Integer"
@@ -48,7 +49,9 @@ module Clicksend
 
     # @param error [Clicksend::Error] the failure of attempt number +attempt+
     #   (0-based); already known to be safe to retry
-    # @return [Numeric, nil] seconds to wait before retrying, or nil to give up
+    # @return [Numeric, nil] seconds to wait before retrying, or nil to give up.
+    #   The connection also gives up on anything that is not a number of
+    #   seconds between 0 and 2**31 - 1 (Kernel.sleep's limit).
     def delay(error:, attempt:, **)
       return if attempt >= max_retries
       return backoff(attempt) unless error.is_a?(RateLimitError)

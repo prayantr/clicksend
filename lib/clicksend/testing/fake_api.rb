@@ -10,16 +10,24 @@ module Clicksend
     #   fake.sent_messages.last.custom_string # => "otp:42"
     #
     # It emulates these endpoints, with ClickSend's response shapes:
-    # POST /v3/sms/send, GET /v3/account, and receipts and inbound (list, one
-    # receipt, mark read). Anything else answers 404 unless #stub-bed.
+    # POST /v3/sms/send, GET /v3/account, receipts and inbound (list, one
+    # receipt, mark read), and cancelling a scheduled message. Anything else
+    # answers 404 unless #stub-bed.
     #
-    # It deliberately does not serve GET /v3/sms/history. ClickSend doesn't
-    # say how soon a sent message appears there, and an always-up-to-date fake
-    # history would let a "not in history, so resend" rule pass its tests and
-    # then send twice in production. To test reconciliation code, #stub the
-    # history rows your scenario needs, including none. Recipients can be rejected (#reject), failures
-    # injected (#fail_next) and receipts and replies seeded (#add_receipt,
-    # #add_inbound).
+    # It deliberately does not serve GET /v3/sms/history by itself. ClickSend
+    # doesn't say how soon a sent message appears there, and an always-up-to-
+    # date fake history would let a "not in history, so resend" rule pass its
+    # tests and then send twice in production. To test reconciliation code,
+    # say what history shows with #stub_history, including nothing.
+    #
+    # Cancelling (PUT /v3/sms/{message_id}/cancel) succeeds for a message the
+    # fake accepted with a schedule still in the future. ClickSend doesn't
+    # document its answer for any other message (unknown, already sent, already
+    # cancelled), so the fake raises Testing::StubError for those: #stub the
+    # answer your test assumes.
+    #
+    # Recipients can be rejected (#reject), failures injected (#fail_next) and
+    # receipts and replies seeded (#add_receipt, #add_inbound).
     #
     # Simplifications, so tests don't come to depend on them:
     # - the balance never changes; +message_parts+ is an estimate (one per
@@ -44,6 +52,8 @@ module Clicksend
       # failures) is not a mistake in the fake's setup and passes through as is.
       MISTAKES = [StandardError, ScriptError].freeze
       STATUS_TEXTS = {200 => "Sent", 201 => "Delivered", 300 => "Retrying", 301 => "Failed"}.freeze
+      # The history statuses ClickSend documents for outbound messages.
+      HISTORY_STATUSES = %w[Queued Completed Scheduled WaitApproval Failed Cancelled CancelledAfterReview Sent].freeze
       ROUTES = [
         [:post, %r{\A/v3/sms/send\z}, :send_sms],
         [:get, %r{\A/v3/account\z}, :account],
@@ -52,9 +62,10 @@ module Clicksend
         [:put, %r{\A/v3/sms/receipts-read\z}, :mark_receipts_read],
         [:get, %r{\A/v3/sms/inbound\z}, :list_inbound],
         [:put, %r{\A/v3/sms/inbound-read\z}, :mark_inbound_read],
-        [:put, %r{\A/v3/sms/inbound-read/([A-Za-z0-9-]+)\z}, :mark_inbound_message_read]
+        [:put, %r{\A/v3/sms/inbound-read/([A-Za-z0-9-]+)\z}, :mark_inbound_message_read],
+        [:put, %r{\A/v3/sms/([A-Za-z0-9-]+)/cancel\z}, :cancel_sms]
       ].freeze
-      private_constant :DECIMAL, :RECIPIENT, :MISTAKES, :STATUS_TEXTS, :ROUTES
+      private_constant :DECIMAL, :RECIPIENT, :MISTAKES, :STATUS_TEXTS, :HISTORY_STATUSES, :ROUTES
 
       # @param balance [String] the account balance, as ClickSend's decimal String
       # @param currency [String] e.g. "AUD"
@@ -72,6 +83,7 @@ module Clicksend
         @clock = clock
         @lock = Mutex.new
         @outbox = [] # [SentMessage, accepted payload]
+        @cancelled = {} # message_id => SentMessage
         @requests = []
         @receipts = []
         @latest_receipts = {} # message_id => payload
@@ -84,11 +96,15 @@ module Clicksend
       # A real Clicksend::Client using this fake, with the production retry
       # rules but no backoff delay. A 429's Retry-After is still honoured
       # (injected 429s default to 0 seconds).
-      # @param overrides [Hash] any Client.new option
+      # @param overrides [Hash] any Client.new option. As with Client.new,
+      #   +max_retries:+ and +retry_policy:+ together raise ConfigurationError.
       # @return [Clicksend::Client]
       def client(**overrides)
-        retries = overrides.key?(:max_retries) ? {max_retries: overrides.delete(:max_retries)} : {}
-        defaults = {username: "test", api_key: "test", transport: self, retry_policy: RetryPolicy.new(**retries, base_delay: 0, max_delay: 0)}
+        defaults = {username: "test", api_key: "test", transport: self}
+        unless overrides.key?(:retry_policy)
+          retries = {max_retries: overrides.delete(:max_retries)}.compact
+          defaults[:retry_policy] = RetryPolicy.new(**retries, base_delay: 0, max_delay: 0)
+        end
         Client.new(**defaults.merge(overrides))
       end
 
@@ -98,17 +114,25 @@ module Clicksend
         @lock.synchronize { @outbox.map(&:first) }.freeze
       end
 
+      # Scheduled messages cancelled through PUT /v3/sms/{message_id}/cancel,
+      # in the order they were cancelled. They stay in #sent_messages: ClickSend
+      # accepted them.
+      # @return [Array<SentMessage>] a frozen snapshot
+      def cancelled_messages
+        @lock.synchronize { @cancelled.values }.freeze
+      end
+
       # Every request received, oldest first, including failed ones.
       # @return [Array<Request>] a frozen snapshot
       def requests
         @lock.synchronize { @requests.dup }.freeze
       end
 
-      # Forgets messages, requests, receipts, inbound messages, rejection
+      # Forgets messages, cancellations, requests, receipts, inbound messages, rejection
       # rules, pending failures and stubs. Constructor settings are kept.
       # @return [self]
       def reset!
-        @lock.synchronize { [@outbox, @requests, @receipts, @latest_receipts, @inbound, @rules, @failures, @stubs].each(&:clear) }
+        @lock.synchronize { [@outbox, @cancelled, @requests, @receipts, @latest_receipts, @inbound, @rules, @failures, @stubs].each(&:clear) }
         self
       end
 
@@ -136,10 +160,20 @@ module Clicksend
       #   fake.fail_next(status: 500, processed: false)
       #   fake.fail_next(status: 429, retry_after: 0)      # never processed
       #   fake.fail_next(status: 401)                      # any 4xx; never processed
+      #   fake.fail_next(:interrupted, processed: true)    # the worker is stopped mid-send
       #
       # +processed:+ is required exactly when the outcome is ambiguous (a read
-      # timeout, a reset or a 5xx): with +true+ the request is handled first (a
-      # send is recorded), then the failure is returned; with +false+ it is not.
+      # timeout, a reset, a 5xx or an interruption): with +true+ the request is
+      # handled first (a send is recorded), then the failure is returned; with
+      # +false+ it is not.
+      #
+      # +:interrupted+ is not a ClickSend failure. It models your job runner
+      # stopping the worker during the call (Sidekiq's shutdown raising
+      # Sidekiq::Shutdown into busy threads, for example) by raising
+      # SimulatedInterrupt, which is not a StandardError: the client lets it
+      # through untouched and never retries it. Use it to test what the next
+      # run of the job does, e.g. that an in-flight marker stops it sending
+      # again.
       #
       # @param path [String, nil] only requests to this exact path
       # @param method [Symbol, nil] only requests with this HTTP method
@@ -166,6 +200,28 @@ module Clicksend
 
         @lock.synchronize { @stubs[[method, path]] = block }
         self
+      end
+
+      # Says what GET /v3/sms/history shows from now on: exactly +messages+
+      # (SentMessages from #sent_messages), each with history status +status+,
+      # in the order given, or nothing at all. Every history request gets these
+      # rows, whatever its q, date or order parameters: you are stating what
+      # ClickSend shows for the query your code makes, at that point in your
+      # scenario. Call it again to change what history shows. Rows have
+      # ClickSend's history shape as observed live (status_code null).
+      #
+      #   fake.stub_history                                     # nothing (yet)
+      #   fake.stub_history(fake.sent_messages.last)            # this message, "Sent"
+      #   fake.stub_history(message, status: "Cancelled")
+      # @return [self]
+      def stub_history(*messages, status: "Sent")
+        messages.each { |message| sent_message!(message, "messages") }
+        unless HISTORY_STATUSES.include?(status)
+          raise ArgumentError, "status must be one of ClickSend's outbound history statuses (#{HISTORY_STATUSES.join(", ")}), got #{status.inspect}"
+        end
+
+        rows = messages.map { |message| Payloads.history_row(message, status, @message_price) }.freeze
+        stub(:get, "/v3/sms/history") { |request| Payloads.page(rows, request.path, request.query, "Here are your history.") }
       end
 
       # Seeds a delivery receipt, unread. Pass +message_id:+, or +for:+ a
@@ -242,6 +298,7 @@ module Clicksend
       # ignored and never stored: they hold the credentials.
       # @return [Clicksend::Transport::Response]
       # @raise [Clicksend::ConnectionError] for injected connection failures
+      # @raise [SimulatedInterrupt] for fail_next(:interrupted)
       def call(method, path, query: nil, body: nil, headers: nil)
         request = build_request(method, path, query, body)
         failure, stub = @lock.synchronize do
@@ -373,6 +430,18 @@ module Clicksend
         entries = @inbound.select { |entry| !entry.read && entry.payload["message_id"] == message_id }
         entries.each { |entry| entry.read = true }
         Payloads.ok("Inbound messages have been marked as read.", entries.size)
+      end
+
+      def cancel_sms(_request, message_id)
+        sent, = @outbox.find { |message, _| message.message_id == message_id }
+        if sent&.scheduled_at && sent.scheduled_at > now && !@cancelled.key?(message_id)
+          @cancelled[message_id] = sent
+          return Payloads.ok("Scheduled sms message has been cancelled.", nil)
+        end
+
+        raise StubError, "ClickSend doesn't document its answer to cancelling a message that is not scheduled for the future " \
+          "(unknown, already sent or already cancelled), so the FakeAPI won't guess: " \
+          "stub PUT /v3/sms/#{message_id}/cancel with the answer your test assumes"
       end
 
       def mark_read(entries, request, message)

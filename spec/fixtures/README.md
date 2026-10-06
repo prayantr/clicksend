@@ -19,6 +19,7 @@ ruby script/openapi_fixtures.rb      # regenerate this directory
 | `sms_inbound.json` | `GET /v3/sms/inbound` | verbatim example |
 | `sms_inbound_read.json` | `PUT /v3/sms/inbound-read` | assembled from per-property examples |
 | `sms_inbound_message_read.json` | `PUT /v3/sms/inbound-read/{message_id}` | verbatim example |
+| `sms_cancel.json` | `PUT /v3/sms/{message_id}/cancel` | verbatim example (`data` is deprecated and null) |
 
 They are kept exactly as published, including places where ClickSend's examples
 disagree with its schemas (listed in `spec/contract/openapi_contract_spec.rb`).
@@ -39,3 +40,7 @@ archived docs list. Every value is a String, as a form-encoded POST arrives in R
 `error_code`/`error_text` assume a null is sent as an empty field (undocumented). Phone numbers
 are ClickSend test numbers and the IDs are made up. `spec/contract/webhook_contract_spec.rb`
 checks the field names against ClickSend's current schemas.
+
+`webhooks/` holds replay fixtures for more push shapes (archived, first-party and documented
+sources, and real captures once there are any), each listed in `webhooks/manifest.yml`; see
+`webhooks/README.md`.

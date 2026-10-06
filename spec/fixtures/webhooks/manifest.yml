@@ -1,0 +1,104 @@
+# Every webhook replay fixture, what it is evidence of, and what parsing it must
+# produce. spec/clicksend/webhook_replay_spec.rb replays each one through Rack.
+#
+# label: how much the shape is worth.
+#   captured     a real push to a URL we control, redacted (none yet)
+#   first_party  shape from a ClickSend-published integration's example or schema
+#   archived     field names from a ClickSend page that is no longer published
+#   documented   field names from ClickSend's current API reference
+#   synthetic    built to exercise the format or a third-party claim; not evidence
+# Values are always made up (ClickSend test numbers, invented IDs), except in
+# captured fixtures, where only non-personal values are kept.
+#
+# expect: model attributes (Time attributes as Unix seconds; ~ for nil).
+# raw: entries that must survive into #raw.
+fixtures:
+  - file: archived/receipt.form
+    kind: receipt
+    label: archived
+    source: https://web.archive.org/web/20250319114946/https://help.clicksend.com/article/p4c49va5b6-what-dlr-format-will-the-api-send
+    note: >-
+      The "DLR Webhook" keys of the archived help article "What DLR format will the API send?",
+      which lists names only (no values, types or order). Includes the legacy aliases messageid
+      and customstring. Empty error_code/error_text assume a null is sent as an empty field.
+    expect: {message_id: 4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B, status_code: 201, error_code: ~, error_text: "", custom_string: order-1042, message_type: sms, subaccount_id: 100002, sent_at: 1759730400, reported_at: 1759730412}
+    raw: {messageid: 4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B, customstring: order-1042, status: Delivered, user_id: "100001"}
+
+  - file: archived/inbound.form
+    kind: inbound
+    label: archived
+    source: https://web.archive.org/web/20250319114946/https://help.clicksend.com/article/p4c49va5b6-what-dlr-format-will-the-api-send
+    note: >-
+      The "Inbound Webhook" keys of the same article. It lists no "to" and no "original_body"
+      (the 2022 REST v3 docs, ClickSend's n8n example and its Power Automate connector all
+      have both), so a push of exactly this shape parses with to = nil. The article describes
+      "sms" as the receiving number; ClickSend's n8n example has sms equal to "from".
+    expect: {message_id: 9E8D7C6B-5A49-4382-9170-6F5E4D3C2B1A, from: "+447777777777", to: ~, body: "Yes please, Thursday works", original_body: ~, original_message_id: 4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B, custom_string: order-1042, received_at: 1759730500}
+    raw: {message: "Yes please, Thursday works", originalsenderid: "+61411111111", sms: "+61411111111", originalmessageid: 4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B, customstring: order-1042, user_id: "100001"}
+
+  - file: archived/inbound.query
+    kind: inbound
+    label: archived
+    source: https://developers.clicksend.com/docs/_spec/messaging/sms.yaml (POST /v3/sms/inbound, webhook_type "get")
+    note: >-
+      An inbound rule with webhook_type "get" sends "the event data as query parameters"
+      (documented). That the query carries the same keys as the form is inferred.
+    expect: {message_id: 9E8D7C6B-5A49-4382-9170-6F5E4D3C2B1A, from: "+447777777777", to: ~, body: "Yes please, Thursday works", received_at: 1759730500}
+    raw: {user_id: "100001"}
+
+  - file: first_party/n8n_inbound.json
+    kind: inbound
+    label: first_party
+    source: https://github.com/ClickSend/integration-n8n/blob/bd95349af8/nodes/ClickSend/ClickSendTrigger.node.ts
+    note: >-
+      Same keys, order and JSON types as the "Example Webhook Payload" in ClickSend's own n8n
+      trigger (example added 2026-04-13), which creates its inbound rule with webhook_type
+      "json" and passes the request body through unchanged. The payload is a flat object; timestamp, user_id and subaccount_id are JSON integers and
+      custom_string is "". Whether the example was copied from a real push is unknown.
+    expect: {message_id: 5F0E1D2C-3B4A-4596-8778-695A4B3C2D1E, from: "+447777777777", to: "+61411111111", body: trigger reply, original_body: TESTING TRIGGER, custom_string: "", received_at: 1759730500}
+    raw: {user_id: 100001, subaccount_id: 100002, sms: "+447777777777", originalsenderid: "+61411111111"}
+
+  - file: first_party/power_automate_inbound.json
+    kind: inbound
+    label: first_party
+    source: https://github.com/thnetii/microsoft-odata-csdl/blob/0257565c8c/powerplatform/apis/shared_clicksendsms/swagger.json
+    note: >-
+      Keys and types of the trigger schema in the ClickSend SMS connector for Microsoft Power
+      Automate (contact Support@clicksend.com; webhook_type "json"), as mirrored on 2023-05-25.
+      It types user_id and subaccount_id as integers but timestamp as a string, unlike the n8n
+      example.
+    expect: {message_id: 9E8D7C6B-5A49-4382-9170-6F5E4D3C2B1A, from: "+447777777777", to: "+61411111111", body: "Yes please, Thursday works", custom_string: order-1042, received_at: 1759730500}
+    raw: {originalmessage: "Can we confirm your appointment on Thursday? Reply YES or NO", user_id: 100001}
+
+  - file: documented/test_inbound.json
+    kind: inbound
+    label: documented
+    source: https://developers.clicksend.com/docs/_spec/messaging/sms.yaml (components/schemas/inbound_sms_test)
+    note: >-
+      The data ClickSend returns from its test-push endpoint POST /v3/sms/inbound. That the push
+      itself carries the same keys (timestamp_send instead of timestamp, the deprecated
+      _keyword) is inferred.
+    expect: {message_id: 7A6B5C4D-3E2F-4011-8223-344556677889, from: "+447777777777", to: "+61411111111", body: This is a test incoming SMS., received_at: 1759730500}
+    raw: {_keyword: this}
+
+  - file: documented/test_receipt.form
+    kind: receipt
+    label: documented
+    source: https://developers.clicksend.com/docs/_spec/messaging/sms.yaml (components/schemas/create-test-sms-receipt)
+    note: >-
+      The data ClickSend returns from its test-push endpoint POST /v3/sms/receipts, form-encoded
+      with nulls as empty fields. That the push carries the same keys (including digits, and
+      custom_string "deprecated and will return null") is inferred.
+    expect: {message_id: 2B3C4D5E-6F70-4182-93A4-B5C6D7E8F901, status_code: 201, error_code: ~, custom_string: "", sent_at: 1759730400, reported_at: 1759730412}
+    raw: {digits: ""}
+
+  - file: synthetic/inbound_union.http
+    kind: inbound
+    label: synthetic
+    source: https://github.com/obrienware/transport/blob/8ec984f4ca/webhook.clicksend-incoming.php
+    note: >-
+      A raw-request fixture in the format the capture script writes. Its keys are the 16 a
+      third-party PHP receiver reads from ClickSend's form POST (the archived article's keys
+      plus to and original_body). Not a capture.
+    expect: {message_id: 9E8D7C6B-5A49-4382-9170-6F5E4D3C2B1A, from: "+447777777777", to: "+61411111111", original_body: "Can we confirm your appointment on Thursday? Reply YES or NO", received_at: 1759730500}
+    raw: {sms: "+447777777777", customstring: order-1042}

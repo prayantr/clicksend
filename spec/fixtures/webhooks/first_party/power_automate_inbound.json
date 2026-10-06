@@ -1,0 +1,18 @@
+{
+  "body": "Yes please, Thursday works",
+  "to": "+61411111111",
+  "from": "+447777777777",
+  "custom_string": "order-1042",
+  "original_message_id": "4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B",
+  "original_body": "Can we confirm your appointment on Thursday? Reply YES or NO",
+  "user_id": 100001,
+  "subaccount_id": 100002,
+  "timestamp": "1759730500",
+  "message_id": "9E8D7C6B-5A49-4382-9170-6F5E4D3C2B1A",
+  "originalsenderid": "+61411111111",
+  "message": "Yes please, Thursday works",
+  "sms": "+447777777777",
+  "originalmessageid": "4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B",
+  "customstring": "order-1042",
+  "originalmessage": "Can we confirm your appointment on Thursday? Reply YES or NO"
+}

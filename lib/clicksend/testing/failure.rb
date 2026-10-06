@@ -13,19 +13,25 @@ module Clicksend
         timeout: [TimeoutError, nil, "Timed out waiting for the response"],
         connection_reset: [ConnectionError, nil, "Connection reset by peer"]
       }.freeze
+      OUTCOMES = (CONNECTION.keys + [:interrupted]).freeze
 
       attr_reader :times
 
       def initialize(outcome, status:, processed:, retry_after:, path:, method:, times:)
         label = outcome ? outcome.inspect : "status: #{status.inspect}"
         if outcome.nil? == status.nil?
-          raise ArgumentError, "fail_next needs an outcome (#{CONNECTION.keys.map(&:inspect).join(", ")}) or status:, not both"
+          raise ArgumentError, "fail_next needs an outcome (#{OUTCOMES.map(&:inspect).join(", ")}) or status:, not both"
         end
         raise ArgumentError, "retry_after: only applies to status: 429" if retry_after && status != 429
 
-        if outcome
+        if outcome == :interrupted
+          # The worker is stopped mid-send: whether ClickSend got the request
+          # first is exactly what the application can't know.
+          @interrupted = true
+          ambiguous = true
+        elsif outcome
           @error_class, @request_sent, @message = CONNECTION.fetch(outcome) do
-            raise ArgumentError, "unknown fail_next outcome #{outcome.inspect}; use one of #{CONNECTION.keys.map(&:inspect).join(", ")} or status:"
+            raise ArgumentError, "unknown fail_next outcome #{outcome.inspect}; use one of #{OUTCOMES.map(&:inspect).join(", ")} or status:"
           end
           ambiguous = @request_sent.nil?
         else
@@ -65,9 +71,14 @@ module Clicksend
         (@path.nil? || @path == request.path) && (@method.nil? || @method == request.http_method)
       end
 
-      # Raises the connection error, or returns the error response.
+      # Raises the connection error or the SimulatedInterrupt, or returns the
+      # error response.
       # @return [Clicksend::Transport::Response]
       def trigger
+        if @interrupted
+          raise SimulatedInterrupt, "Worker interrupted mid-request, #{@processed ? "after" : "before"} ClickSend processed it " \
+            "(simulated by Clicksend::Testing::FakeAPI#fail_next(:interrupted); this models the job runner, not ClickSend)"
+        end
         raise @error_class.new("#{@message} (simulated by Clicksend::Testing::FakeAPI)", request_sent: @request_sent) if @error_class
         return Payloads.error(@status) unless @status == 429
 

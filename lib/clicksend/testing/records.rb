@@ -9,12 +9,28 @@ module Clicksend
     SentMessage = Data.define(:message_id, :to, :from, :body, :custom_string, :list_id, :scheduled_at, :country, :sent_at)
 
     # Raised when test code given to the FakeAPI (a #stub block, or the
-    # +clock:+) raises a StandardError or ScriptError, i.e. has a bug. It is
+    # +clock:+) raises a StandardError or ScriptError, i.e. has a bug, or when
+    # a test asks the fake for an answer ClickSend doesn't document (such as
+    # cancelling a message that is not scheduled), which it must #stub. It is
     # deliberately not a StandardError, so the client does not report it as a
     # ClickSend failure (connection error, retry, "ambiguous" send): a typo in
     # a stub must fail the test, not satisfy it. Other exceptions (Ctrl-C,
     # timeouts, assertion failures) are never converted.
     class StubError < Exception # rubocop:disable Lint/InheritException
+    end
+
+    # Raised by FakeAPI#fail_next(:interrupted, processed: ...): the job
+    # runner stopping the worker in the middle of a send, before or after
+    # ClickSend processed it. It models your job runner (Sidekiq's shutdown
+    # raising Sidekiq::Shutdown into busy threads, a deploy's SIGTERM, a
+    # timeout), not anything ClickSend does.
+    #
+    # Like those, it is not a StandardError, so the client lets it through
+    # untouched: it is never retried, never wrapped in a Clicksend::Error and
+    # never reported as ambiguous. It is not an ::Interrupt either, so a test
+    # that doesn't rescue it fails like any other example instead of
+    # stopping the test run.
+    class SimulatedInterrupt < Exception # rubocop:disable Lint/InheritException
     end
 
     # A request the FakeAPI received, recorded whatever its outcome.

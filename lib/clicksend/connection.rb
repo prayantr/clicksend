@@ -15,6 +15,15 @@ module Clicksend
   class Connection
     HTTP_METHODS = %i[get post put patch delete].freeze
 
+    # What code outside the gem (a logger, an instrumenter, a retry policy, a
+    # custom transport) raises when it has a bug: StandardError, and also
+    # ScriptError (NotImplementedError from an abstract method, LoadError from
+    # a lazily required exporter). Such a failure must never escape as a
+    # non-Clicksend error after a send was accepted: job runners such as
+    # Sidekiq rescue Exception and would run the job, and the send, again.
+    # Interrupt, SystemExit and NoMemoryError still propagate.
+    FOREIGN_FAILURES = [StandardError, ScriptError].freeze
+
     ERROR_CLASSES = {
       400 => BadRequestError,
       401 => AuthenticationError,
@@ -33,6 +42,11 @@ module Clicksend
     # [:rejected]     any other 4xx: ClickSend refused the request
     RETRY_ALWAYS = %i[rate_limited not_sent].freeze
     MAY_HAVE_BEEN_PROCESSED = %i[unknown undocumented].freeze
+
+    # The longest delay (seconds, about 68 years) Kernel.sleep accepts on
+    # every platform. A policy delay beyond it can't be waited for (sleep
+    # raises RangeError), so it means "don't retry".
+    MAX_SLEEP = (2**31) - 1
 
     # @param headers [Hash] sent with every request (authentication, User-Agent)
     # @param instrumenter [#instrument] see Clicksend::Instrumentation
@@ -71,37 +85,72 @@ module Clicksend
     # this, a metrics outage after an accepted send would surface as a
     # non-Clicksend error that a job runner retries: a duplicate SMS.
     #
-    # +state+ moves :pending -> :running -> :done. Only an exception that
-    # arrives once the request is :done can be the instrumenter's own, and
-    # only then is it ignored. Anything raised while the request is :running
-    # propagates: #run turns every failure it can foresee into a
-    # Clicksend::Error, so that is a genuine bug, never something to hide
-    # (hiding it once made #request return nil after an accepted send). A
-    # second call of the block raises instead of sending again.
+    # +state+ moves :pending -> :running -> :done, under a lock because an
+    # instrumenter may run the block on another thread. What it is when
+    # #instrument returns or raises decides the outcome:
+    #
+    # [:done]    the call's result or error. Any other exception can only be
+    #            the instrumenter's, and only then is it ignored.
+    # [:pending] nothing was sent. The block becomes :abandoned, so an
+    #            instrumenter that kept it and calls it later gets a
+    #            ConfigurationError instead of sending.
+    # [:running] the block was left unfinished. An exception that escaped the
+    #            request itself is a genuine bug and propagates: #run turns
+    #            every failure it can foresee into a Clicksend::Error, and
+    #            hiding one once made #request return nil after an accepted
+    #            send. Otherwise the block is still running on another thread
+    #            (or the instrumenter swallowed what it raised), so the
+    #            request may be or may yet be sent: a ConfigurationError,
+    #            ambiguous unless the request is idempotent.
+    #
+    # A second call of the block raises instead of sending again.
     def instrumented(call)
       payload = {http_method: call[:method], path: reported_path(call[:path]), operation: call[:operation], idempotent: call[:idempotent]}
+      lock = Mutex.new
       state = :pending
-      outcome = nil
+      outcome = escaped = failure = nil
       begin
         @instrumenter.instrument("request.clicksend", payload) do
-          raise ConfigurationError, "the instrumenter ran the request block twice; #instrument must yield once" unless state == :pending
+          lock.synchronize do
+            raise ConfigurationError, "the instrumenter ran the request block after #instrument returned; it must yield before returning" if state == :abandoned
+            raise ConfigurationError, "the instrumenter ran the request block twice; #instrument must yield once" unless state == :pending
 
-          state = :running
-          outcome = begin
+            state = :running
+          end
+          result = begin
             yield payload
           rescue Error => e
             e
+          rescue Exception => e # rubocop:disable Lint/RescueException
+            lock.synchronize { escaped = e }
+            raise
           end
-          state = :done
+          lock.synchronize { outcome, state = result, :done }
           # Raise inside the block so ActiveSupport records the exception.
-          outcome.is_a?(Error) ? raise(outcome) : outcome
+          result.is_a?(Error) ? raise(result) : result
         end
       rescue Exception => e # rubocop:disable Lint/RescueException
-        raise unless state == :done && e.is_a?(StandardError) && !e.equal?(outcome)
-
-        log(:warn) { "instrumenter raised #{e.class.name} for #{call[:method].upcase} #{reported_path(call[:path])}; ignored" }
+        failure = e
       end
-      raise ConfigurationError, "the instrumenter did not run the request: #instrument must yield" if state == :pending
+      final, escaped = lock.synchronize { [(state == :pending) ? (state = :abandoned) : state, escaped] }
+
+      case final
+      when :abandoned
+        raise failure if failure # the instrumenter failed before the request: nothing was sent
+
+        raise ConfigurationError, "the instrumenter did not run the request: #instrument must yield"
+      when :running
+        raise failure if failure&.equal?(escaped)
+
+        error = ConfigurationError.new("the instrumenter returned before the request finished; #instrument must run the block to completion before returning")
+        error.mark_ambiguous! unless call[:idempotent]
+        raise error, cause: failure
+      end
+      if failure && !failure.equal?(outcome)
+        raise failure unless FOREIGN_FAILURES.any? { |kind| failure.is_a?(kind) }
+
+        log(:warn) { "instrumenter raised #{failure.class.name} for #{call[:method].upcase} #{reported_path(call[:path])}; ignored" }
+      end
       raise outcome if outcome.is_a?(Error)
 
       outcome
@@ -151,7 +200,7 @@ module Clicksend
         return [e.dup, :undocumented]
       rescue Error => e
         return [e.dup, :unknown] # any other Clicksend error from a custom transport: outcome unknown
-      rescue => e
+      rescue *FOREIGN_FAILURES => e
         return [wrap_failure(ConnectionError, "The transport failed", e), :unknown]
       end
       log(:info) { "#{call[:method].upcase} #{reported_path(call[:path])} -> #{raw.status} (#{elapsed_ms(started)}ms)" }
@@ -159,9 +208,9 @@ module Clicksend
         interpret(raw)
       rescue MalformedResponseError => e
         [e, :undocumented]
-      rescue => e
-        # A response this gem cannot even read (e.g. a body that is not valid
-        # in its declared charset) is undocumented: ambiguous for a send.
+      rescue *FOREIGN_FAILURES => e
+        # A response this gem cannot even read (e.g. a custom transport's
+        # body that is not a String) is undocumented: ambiguous for a send.
         [wrap_failure(MalformedResponseError, "Could not read ClickSend's response", e), :undocumented]
       end
     end
@@ -209,9 +258,11 @@ module Clicksend
       return unless budget.is_a?(Integer) && attempt < budget
 
       delay = @retry_policy.delay(error: error, attempt: attempt)
+      return if (delay.is_a?(Integer) || delay.is_a?(Rational)) && delay > MAX_SLEEP # Float() would warn
+
       delay = Float(delay) if delay.is_a?(Numeric)
-      delay if delay.is_a?(Float) && delay.finite? && delay >= 0
-    rescue => e
+      delay if delay.is_a?(Float) && delay.between?(0, MAX_SLEEP)
+    rescue *FOREIGN_FAILURES => e
       # A broken policy stops retrying (the safe direction) and keeps the
       # request's own error.
       log(:warn) { "retry policy raised #{e.class.name}; not retrying" }
@@ -226,7 +277,7 @@ module Clicksend
       payload = {http_method: call[:method], path: reported_path(call[:path]), operation: call[:operation], attempt: attempt,
                  delay: delay, error_class: error.class.name, http_status: error_status(error)}
       @instrumenter.instrument("retry.clicksend", payload) {}
-    rescue => e
+    rescue *FOREIGN_FAILURES => e
       log(:warn) { "instrumenter raised #{e.class.name} for retry.clicksend; ignored" }
     end
 
@@ -249,11 +300,15 @@ module Clicksend
 
     # Returns the parsed JSON, nil for an empty body, or the raw String when an
     # error response isn't JSON (e.g. an HTML page from a proxy).
+    #
+    # A body that isn't valid in its declared charset (JSON converts it to
+    # UTF-8 first) is unreadable in the same way, so the status still decides:
+    # a garbled 429 or 503 must stay retryable, and a 400 a rejection.
     def parse_body(raw)
       return nil if raw.body.b.strip.empty?
 
       JSON.parse(raw.body, freeze: true)
-    rescue JSON::ParserError
+    rescue JSON::ParserError, EncodingError
       return raw.body unless success?(raw.status)
 
       raise MalformedResponseError.new(
@@ -296,14 +351,14 @@ module Clicksend
     # the outcome is simply not recorded.
     def record(payload, **outcome)
       payload.update(outcome)
-    rescue
+    rescue *FOREIGN_FAILURES
       nil
     end
 
     # A failing logger must not turn a completed request into an error.
     def log(level)
       @logger&.public_send(level, "[clicksend] #{yield}")
-    rescue
+    rescue *FOREIGN_FAILURES
       nil
     end
 

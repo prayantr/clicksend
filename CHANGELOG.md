@@ -4,6 +4,165 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.2.0] - 2026-10-06
+
+Cancelling and reconciling messages, test-framework helpers, opt-in persistent connections, and
+hardening. Mostly additive. "Fixed" lists behaviour changes an existing application may notice,
+such as `Marshal.dump(client)` and `YAML.dump(client)` now raising and stricter `Retry-After`
+parsing. `sms.cancel` is **experimental** and may change in a minor release: its successful answer
+has not been observed live (see below). The OpenTelemetry instrumenter is a separate gem,
+`clicksend-opentelemetry` (`companions/`), released on its own schedule.
+
+### Added
+
+- **`sms.cancel(message_id)` (experimental)** cancels one scheduled SMS
+  (`PUT /v3/sms/{message_id}/cancel`) and returns nil. ClickSend documents only the successful
+  answer, and no idempotency, so it is not retried after a timeout or 5xx; such a failure is an
+  `AmbiguousRequestError` (the message may or may not have been cancelled). Check
+  `sms.history(message_id:)` for the status `"Cancelled"` when it matters.
+  `PUT /v3/sms/cancel-all` is still deliberately not wrapped.
+  The successful 200 `SUCCESS` answer is covered by contract specs but was **not observed live**:
+  ClickSend's free test number doesn't hold scheduled messages (they show as `Completed` within
+  seconds), so it can't exercise a successful cancel. Live cancels of those test-number messages,
+  a repeated cancel and a random ID all answered HTTP 404 `NOT_FOUND`, raised as
+  `Clicksend::NotFoundError`. A 404 doesn't say which case applies; it does not mean "already
+  sent". The API may change in a minor release once a real cancellation has been observed.
+- `sms.search_history(to:, custom_string:, sent_after:, sent_before: nil)` returns the outbound
+  history rows ClickSend shows now for that recipient and exact `custom_string`, possibly none. It
+  widens the date window by five minutes on each side, reads every page (100 rows each), and
+  requires an E.164 recipient. An empty result is not proof that nothing was sent.
+- Testing: `FakeAPI` cancels messages it holds as scheduled for the future
+  (`fake.cancelled_messages`) and raises `StubError` for every cancel ClickSend doesn't document,
+  so tests must stub that answer. `fake.stub_history(*messages, status: "Sent")` states what
+  history shows; the fake still serves no history by itself.
+- Testing: opt-in RSpec matchers, `require "clicksend/testing/rspec"`:
+  `expect(fake).to have_sent_sms(to:, body:, custom_string:, ...)` (any `SentMessage` attribute,
+  matched with `===`) with `.once`, `.twice`, `.times(n)` and `.exactly(n).times`;
+  `not_to have_sent_sms(...)`; and `have_sent_no_sms`. Without a count exactly one message must
+  match, so a duplicate fails, and the negated form means "none matching". Failures list what was
+  sent, one line per message (at most ten, long values shortened). The require includes the
+  matchers in every example group (`Clicksend::Testing::RSpecMatchers`).
+- Testing: opt-in Minitest assertions, `require "clicksend/testing/minitest"` and
+  `include Clicksend::Testing::MinitestAssertions`: `assert_sms_sent(fake, count: 1, **attributes)`
+  (returns the matching messages) and `assert_no_sms_sent(fake, **attributes)`, with the same
+  matching and failure output. Neither framework is a dependency or loaded by
+  `require "clicksend"` or `require "clicksend/testing"`.
+- Testing: `fake.fail_next(:interrupted, processed: true|false)` simulates the job runner stopping
+  the worker mid-send (Sidekiq's shutdown, a deploy's SIGTERM), after or before ClickSend processed
+  the request. It raises `Clicksend::Testing::SimulatedInterrupt`, an `Exception` that is neither
+  a `StandardError` nor an `Interrupt`, so it passes through the client untouched and is never
+  retried. Use it to test that the job's re-run doesn't send again. ClickSend itself never does
+  this.
+
+### Fixed
+
+- **Instrumenters that don't run the block synchronously can no longer send late or return nil.**
+  A `request.clicksend` block kept by the instrumenter and called after `#instrument` returned
+  now raises `ConfigurationError` without sending (before, the call raised `ConfigurationError`
+  and the SMS was sent later anyway). If `#instrument` returns while the block is still running on
+  another thread, or after swallowing an exception that escaped the request, the call raises a
+  `ConfigurationError` that is also an `AmbiguousRequestError` unless the request is idempotent
+  (before, `Client#request` could return nil while the send went ahead).
+- **A `ScriptError` from code outside the gem is handled like any other failure.** A logger or
+  instrumenter raising `NotImplementedError` or `LoadError` after a send was accepted escaped as a
+  non-Clicksend error (also in 1.1); job runners such as Sidekiq rescue `Exception` and would run
+  the job, and the send, again. Loggers, instrumenters, retry policies and custom transports are
+  now treated the same for `StandardError` and `ScriptError`: the request's own result or error
+  wins, and a custom transport's `ScriptError` is an ambiguous `ConnectionError` for a send.
+  `Interrupt`, `SystemExit` and `NoMemoryError` still propagate.
+- **`Clicksend::Client` refuses `Marshal.dump` and `YAML.dump`** (`TypeError`), including inside
+  another object such as `client.sms`. A client holds the API key, which both used to write out in
+  clear (e.g. into a cache or a job payload). Build a new client instead. Responses and errors can
+  still be serialized. Other serializers that walk instance variables (e.g. ActiveSupport's
+  `Object#as_json`) are not covered: pass job arguments, not clients.
+- **A retry delay too long to sleep no longer raises `RangeError`.** With
+  `RetryPolicy.new(max_retry_after: Float::INFINITY)`, a `Retry-After: 99999999999999999999` made
+  `Kernel.sleep` raise `RangeError` instead of the `RateLimitError`. A delay over 2**31 - 1 seconds
+  (from any policy) now means "don't retry": the request's own error is raised.
+- **A retry policy answering with an Integer or Rational too large for a Float** no longer makes
+  Ruby print "Integer out of Float range" (with `-W`); it means "don't retry", as before.
+- **Pagination never raises a non-Clicksend error for a nonsensical page.** A `current_page` below 1,
+  or a negative `last_page`, `total` or `per_page`, is a `MalformedResponseError` with the request
+  attached (before, `current_page: -1` made `next_page` raise `ArgumentError`).
+  `client.paginate(path, query: nil)` now means no query, like `Client#request`; any other
+  non-Hash `query:` raises `ArgumentError` (before, both raised `NoMethodError`).
+- **A response body that isn't valid in its declared charset is classified by its status.** A
+  body labelled e.g. `charset=us-ascii`, `shift_jis` or `utf-16le` that holds bytes invalid in that
+  charset made JSON raise an `EncodingError`, so every such response became an unreadable
+  (`MalformedResponseError`) one: a GET's 503 was not retried, and a send's 429 was reported as
+  ambiguous instead of being retried. Such a body is now treated like any other non-JSON body: an
+  error status keeps the raw body and its usual error class and retry rule; a 2xx is still a
+  `MalformedResponseError` (ambiguous for a send). Bodies labelled `utf-8` were already handled.
+- **`RateLimitError#retry_after` accepts only what RFC 9110 allows**: plain non-negative decimal
+  seconds or an HTTP-date. It used Ruby's `Integer()`, so `"0x10"` meant 16 seconds, `"1_0"` 10 and
+  `"+5"` 5; those, `"-5"` (before: 0) and non-String values are now nil, and the retry policy backs
+  off as for a missing header. It no longer raises for `nil` headers or an Array value from a
+  custom transport, so such a 429 is retried with backoff instead of being raised at once.
+- Testing: `FakeAPI#client(max_retries:, retry_policy:)` silently ignored `max_retries:`. It now
+  raises `ConfigurationError`, exactly as `Client.new` does for both, and `max_retries: nil` means
+  the default, as in `Client.new`.
+- **With `adapter: :net_http_persistent`, failures before the request was written are no longer
+  ambiguous.** That adapter reports them differently from the default one, so a refused connection
+  (`Net::HTTP::Persistent::Error` "connection refused", caused by `Errno::ECONNREFUSED`), a connect
+  or TLS-handshake timeout (`Net::OpenTimeout`, wrapped in `Faraday::TimeoutError`) and a wait for a
+  pooled connection longer than connection_pool's 0.5 s (`ConnectionPool::TimeoutError`) were
+  classified as possibly sent: a send that never left was an `AmbiguousRequestError` and not
+  retried. They are now not sent, so they are retried like the default adapter's (and a pool wait is
+  a `TimeoutError`). A downed host and TLS errors still count as possibly sent with either adapter.
+
+### Changed
+
+- **Webhook documentation corrected from new evidence** (`Clicksend::Webhook` is still
+  experimental; no behaviour changed). Archived ClickSend help articles and ClickSend's own n8n
+  and Power Automate integrations list the pushed fields, including legacy duplicates (`message`,
+  `sms`, `originalsenderid`, `messageid`, `customstring`, ...) that stay in `#raw`. The README and
+  API notes no longer say that no source ever listed IP addresses: an archived article did, but it
+  is stale and unpublished, so the gem still offers no allowlist. Archived sources disagree on the
+  retry schedule, which is now said. Receipts must be deduplicated on `message_id` and
+  `status_code`, not `message_id` alone, because a message may get more than one receipt. New
+  receiver advice: secret rotation, `discard_on Clicksend::Webhook::InvalidPayload`, Rails'
+  log filtering, voice/email/fax receipts sharing the format, inbound MMS links, and the
+  dashboard's "Add Test Reply".
+
+### Documentation
+
+- **Background jobs rewritten from new measurements** (ActiveJob 8.1.4, Sidekiq 8.1.7 and
+  ActiveRecord 8.1.4 against local stand-ins for ClickSend). The 1.1 recipe stops framework
+  retries from repeating an ambiguous send, but a real Sidekiq process stopped mid-send re-ran the
+  job and sent the message twice with the default 30s read timeout (once with a 1s timeout). The
+  README now covers: a timeout budget for job clients (one attempt must end inside the runner's
+  shutdown timeout; Sidekiq's default is 25s); the `retry_on`/`discard_on` declaration order (the
+  same two lines in the wrong order sent twice); stacked retry layers (`retry_on` re-raises when
+  exhausted and the backend retries again); an in-flight marker committed on the application's own
+  row before `deliver` (claiming inside the send's own transaction still sent twice); a
+  reconciliation job built on `sms.search_history` that never resends on "not found"; and a
+  Sidekiq recipe with `sidekiq_retry_in` returning `:kill`.
+- Observability recipes: `key=value` logs, metrics labelled by `operation` (never by `path`, which
+  can hold message IDs), and a Rails 8.1 `Rails.event` bridge. The OpenTelemetry warning now names
+  what the stock Faraday and Net::HTTP instrumentations record (the query string, with the
+  recipient's number from `sms.history(to:)`) and how to exclude ClickSend from them.
+- Persistent connections: the measured benefit (local benchmark), the pool-size rule, and which
+  failures are retried under that adapter (see "Fixed").
+- The companion gem `clicksend-opentelemetry` 0.1.0, in `companions/clicksend-opentelemetry`, is
+  versioned and released separately and is not yet on RubyGems: one OpenTelemetry span per
+  ClickSend call, built on the `instrumenter:` hook, with no query strings, bodies or phone
+  numbers. It changes nothing in this gem, which still depends on Faraday only. See its own
+  [CHANGELOG](companions/clicksend-opentelemetry/CHANGELOG.md).
+
+### Development
+
+- Webhook replay fixtures (`spec/fixtures/webhooks`, one per published push shape, replayed
+  through Rack's request parsing) and `script/webhook_capture.rb`, which captures real pushes
+  locally and redacts them into fixtures. `rack` is a new development dependency.
+- `minitest` is now declared as a development dependency (it was only pulled in through
+  activesupport); the Minitest assertions are tested inside real `Minitest::Test` cases.
+- `faraday-net_http_persistent` is a new development dependency:
+  `spec/integration/persistent_connection_spec.rb` runs that adapter on real sockets (plain and
+  TLS) and pins that a reused connection failing after the write never hides a retry of a POST or
+  PUT, that timeouts are honoured, and the not-sent classifications above.
+
 ## [1.1.0] - 2026-10-06
 
 Failure semantics, observability and testing support for production messaging. Mostly additive;
@@ -192,6 +351,8 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
 - Last release of the original gem: send SMS, poll replies and delivery reports, and check
   the balance through ClickSend's v2 API.
 
+[Unreleased]: https://github.com/prayantr/clicksend/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/prayantr/clicksend/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/prayantr/clicksend/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...v1.0.0
 [1.0.0.rc1]: https://github.com/prayantr/clicksend/compare/c99edc5...v1.0.0.rc1

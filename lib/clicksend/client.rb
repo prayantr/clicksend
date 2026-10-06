@@ -148,7 +148,11 @@ module Clicksend
     #   page = client.paginate("/v3/sms/history", query: {date_from: from.to_i}, limit: 100)
     #   page.auto_paging_each { |message| ... }
     #
+    # @param query [Hash, nil] query parameters, kept for every page
+    # @param page [Integer, nil] the page to fetch (from 1)
+    # @param limit [Integer, nil] items per page, 15 to 100
     # @return [Clicksend::Page]
+    # @raise [ArgumentError] for an invalid query, page or limit
     def paginate(path, query: {}, page: nil, limit: nil, operation: nil)
       Page.fetch(self, path, query: query, page: page, limit: limit, operation: operation)
     end
@@ -170,6 +174,18 @@ module Clicksend
       "#<#{self.class.name} username=#{username.inspect} base_url=#{base_url.inspect}>"
     end
     alias_method :to_s, :inspect
+
+    # A client holds the API key (in its settings and its Authorization
+    # header), so it must never be written to a cache, a job queue or a
+    # session by Marshal or YAML. Marshal checks #marshal_dump first, for
+    # frozen objects too; Psych checks #encode_with.
+    def marshal_dump
+      raise TypeError, "#{self.class.name} contains credentials and can't be marshaled; build a new client instead"
+    end
+
+    def encode_with(_coder)
+      raise TypeError, "#{self.class.name} contains credentials and can't be serialized to YAML; build a new client instead"
+    end
 
     private
 

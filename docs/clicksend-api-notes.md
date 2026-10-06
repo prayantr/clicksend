@@ -13,7 +13,9 @@ Sources:
 - [SMS error codes](https://help.clicksend.com/en/articles/42318-sms-error-codes)
 - Superseded but still informative: the [legacy HTTP v2 docs](https://developers.clicksend.com/docs/http/v2/)
   and the [archived REST v3 docs](https://web.archive.org/web/20220502204655/https://developers.clicksend.com/docs/rest/v3/)
-  (2022), the only sources that list the fields ClickSend pushes to webhook URLs
+  (2022), and help articles that disappeared when ClickSend moved its help centre (around mid-2025,
+  judging by the Wayback Machine, which kept them). Those, and ClickSend's own integrations, are the only sources that list
+  the fields ClickSend pushes to webhook URLs; see `research/1.2-webhooks.md` in the repository
 
 ## Behaviour taken from the documentation
 
@@ -35,8 +37,14 @@ Sources:
 | Idempotency | No idempotency key on any operation (all 34 sections searched) | Sends are never retried after timeouts or 5xx |
 | `THROTTLED` | Application code: "Identical message body recently sent to the same recipient." Window and placement undocumented | Treated as an ordinary rejection; never relied on for deduplication |
 | History search | `GET /v3/sms/history`: `date_from`, `date_to`, `order_by` (`date:asc` default), `page`, `limit`, and `q=field:value` for `status`, `to`, `from`, `subaccount_id`, `message_id`. `custom_string` is **not** a filter | `sms.history` takes one of `to:`, `from:`, `status:`, `message_id:`; match `custom_string` yourself |
-| Webhooks (push) | Automation rules with the `URL` action. Inbound rules: `webhook_type` `post` (form, default), `get` or `json` (format unspecified). Receipts: form-encoded POST according to the archived v3 docs (help 42270 covers inbound rules only). **No payload schema** in the current docs; the archived docs list the fields, matching the poll schemas plus `user_id` and (receipts) `status`. Archived: a non-200 is retried every 10 minutes, 10 times | `Clicksend::Webhook` parses into `SMS::Receipt` / `SMS::InboundMessage` |
-| Webhook authentication | **None documented.** No signature, HMAC or shared secret in any current, archived or help source. Current docs list no source IP addresses; archived help pages (around 2019–2021, no longer published) listed six and said pushes come from a fixed pool | No verification method and no IP allowlisting; README prescribes a secret URL and confirming via the API |
+| Combining search filters | The general "Searching and Sorting" section shows `q=field:value,field2:value`, `AND` by default, and `operator=OR`; searches are "**not** case-sensitive". The history operation itself documents one `field_name:value` and no `operator`, and calls the value "the text or keyword you're searching for" (exact or partial match unstated) | `sms.history` sends one filter; `sms.search_history` re-checks `to` and `custom_string` for exact equality |
+| History retention | Help 43125: message data is kept for four months, then archived and "no longer available to view in the Dashboard, or downloadable from the History page or API". De-identification (on request) obfuscates `to` "in any history downloads" | Another reason an empty history search proves nothing |
+| History consistency | **None documented**: no statement anywhere (current, archived or help) on how soon an accepted send appears in `GET /v3/sms/history` | `search_history` returns rows only; never "not sent" |
+| Cancel one scheduled SMS | `PUT /v3/sms/{message_id}/cancel`, no body; 200 example `response_msg: "Scheduled sms message has been cancelled."`, `data` "deprecated and will return null" (archived 2022: `data: []`, message naming the ID). Answers for an unknown, sent or already-cancelled ID, and idempotency, are **undocumented** | `sms.cancel`, not idempotent: never retried after a timeout or 5xx |
+| Cancel all scheduled SMS | `PUT /v3/sms/cancel-all`; optional body `custom_string` limits it to messages with that value (match semantics undocumented); without it, every scheduled SMS is cancelled. Returns `data.count` | Deliberately not wrapped |
+| Price quote | `POST /v3/sms/price`: "calculate the price of sending messages". The only statement about effects is in the `sms` schema's `date`: it may be empty "in price-calculation responses where no message has actually been sent yet". The example returns a `message_id` | Not wrapped; `client.request` treats it as non-idempotent |
+| Webhooks (push) | Automation rules with the `URL` action. Inbound rules: `webhook_type` `post` (form, default), `get` or `json` (format unspecified; ClickSend's n8n trigger shows a flat JSON object with integer `timestamp`/`user_id`). Receipts: form-encoded POST according to archived help ("the only forwarding format we support is x-www-form-urlencoded"). **No payload schema** in the current docs; archived docs and help list the fields: the poll schemas' names plus `user_id`, `status` (receipts) and legacy duplicates (`message`, `sms`, `originalsenderid`, `originalmessage`, `originalmessageid`, `customstring`, `messageid`). Retries: archived sources disagree (every 10 minutes ×10 with a 30 s timeout, or backoff over hours with a 15 s timeout); nothing current | `Clicksend::Webhook` parses into `SMS::Receipt` / `SMS::InboundMessage`; the extra keys stay in `#raw` |
+| Webhook authentication | **None in the current docs**: no signature, HMAC or shared secret. Archived help (no longer published) suggested HTTPS, a URL token, checking `user_id`, and an allowlist of six source IPs last updated around 2019 | No verification method; README prescribes a secret URL and confirming via the API, and warns against the stale IP list |
 | Request ID | None documented; no spec declares any response header | `Error#request` describes the call instead |
 
 ## Ambiguities and inconsistencies
@@ -145,21 +153,57 @@ the contract specs only, **not** against a live receipt.
 | `GET /v3/sms/history?q=to:%2B61411111111&date_from=…&order_by=date:asc&limit=100` (`sms.history(to:, date_from:)`) | HTTP 200, paginated envelope. Exactly one row, the accepted test-number message from 2026-10-05, so `q=to:` filters and the encoded `+` works. Row: `direction: "out"`, `status: "Completed"`, `status_code: null`, `status_text: null`, `message_parts: 0`, `message_price: "0.0000"`, `custom_string` a String, `date` an Integer, `schedule` a String. The documented fields, plus `contact_id`, `user_id`, `subaccount_id`, `first_name`, `last_name`, `_api_username` |
 | `GET /v3/account` rate-limit headers through `Response#rate_limit` | `limit: 20`, `remaining` and `reset_in` Integers |
 
+### `sms.cancel` check (2026-10-06, protocol B3.7)
+
+Run through the gem (`client.sms.cancel`, `max_retries: 0`) with one scheduled message to the free
+test number `+61411111111` (`schedule:` one hour ahead) and nothing else sent. Every call was
+answered quickly (under 1.1s); the balance was the same before the send, after it, and at the end.
+
+| Step | Live result |
+|---|---|
+| Scheduled send to the test number | HTTP 200, per-message `status: "SUCCESS"`, `message_price: "0.0000"`, `message_parts: 0`, `schedule` one hour ahead |
+| History (`q=message_id:`) at 0s, 5s, 30s, 120s | No row at 0s. From 5s on, one row with status **`Completed`** (not `Scheduled`), `status_code: null` |
+| `PUT /v3/sms/{id}/cancel` on that message, no body | HTTP **404** `{"http_code":404,"response_code":"NOT_FOUND","response_msg":"Record not found.","data":null}`. The gem raised `Clicksend::NotFoundError`, not ambiguous |
+| History after the cancel (0s to 120s) | Still `Completed` |
+| The same cancel again | Same HTTP 404 `NOT_FOUND` envelope |
+| A random well-formed UUID | Same HTTP 404 `NOT_FOUND` envelope |
+| The 2026-10-05 accepted test-number message (`Completed`) | Same HTTP 404 `NOT_FOUND` envelope; history unchanged |
+
+What this shows:
+- A scheduled message to the free test number is **not held**: it is `Completed` within seconds,
+  so the test number can't exercise a successful cancel. The documented `200 SUCCESS` answer is
+  still unobserved live.
+- Cancelling a message that is no longer scheduled answers 404 `NOT_FOUND`, **not** `SUCCESS`, at
+  least for test-number messages. An unknown ID gets the same answer, so a 404 doesn't say which.
+- The path, the bodiless `PUT`, the JSON error envelope and the gem's mapping (typed, not
+  ambiguous, not retried) match the implementation.
+
 ### Still unverified
 
 These need a receipt for a real (non-test) message, existing inbound messages, or the public
 test accounts:
 
 - [ ] A live receipt: its shape and `status_code` type. The free test number produced none.
+- [ ] A successful `sms.cancel` (HTTP 200) and how a cancelled message shows in history. A
+      scheduled message to the free test number completes at once, so this needs a message that
+      ClickSend actually holds, i.e. a paid, scheduled send that is then cancelled.
 - [ ] Inbound timestamp field (`timestamp` or `timestamp_send`); no inbound messages existed
 - [ ] HTTP status and `response_code` for the `nocredit`, `notactive` and `banned` test accounts
 - [ ] Whether mark-read accepts an empty `{}` body. Deliberately not tested, because it would
       mark every unread item read (documented). The gem sends `{}` when `before:` is omitted; the
       request schema allows it.
-- [ ] A real webhook push: its content type, field names and types. Field names come from the
-      poll schemas and the archived docs
+- [ ] A real webhook push: its content type, field names and types (inbound `post`, `get` and
+      `json`, and a receipt), its headers, and how `null` is encoded. Field names come from the poll
+      schemas, archived docs and ClickSend's integrations. `script/webhook_capture.rb` and the
+      capture protocol in `research/1.2-webhooks.md` exist for this
+- [ ] Whether `GET /v3/sms/receipts/{message_id}` finds a receipt on an account with only URL rules
+- [ ] ClickSend's current retry schedule and timeout for pushes
 - [ ] How soon a sent message appears in history, and whether `date_from`/`date_to` are inclusive
 - [ ] Where and when `THROTTLED` is returned
+- [ ] What `PUT /v3/sms/{message_id}/cancel` answers for a second cancel, an already-sent message
+      and an unknown ID (protocol in `research/1.2-api-cancel-quote-history.md`)
+- [ ] Whether `POST /v3/sms/price` changes anything: balance, history, `THROTTLED`, rate limits
+- [ ] Whether history's `q=to:` matches exactly or by substring
 - [ ] Rate limits for endpoints other than `GET /v3/account`
 
 ## Retry safety: the rules and why
