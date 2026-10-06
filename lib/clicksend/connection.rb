@@ -34,6 +34,11 @@ module Clicksend
     RETRY_ALWAYS = %i[rate_limited not_sent].freeze
     MAY_HAVE_BEEN_PROCESSED = %i[unknown undocumented].freeze
 
+    # The longest delay (seconds, about 68 years) Kernel.sleep accepts on
+    # every platform. A policy delay beyond it can't be waited for (sleep
+    # raises RangeError), so it means "don't retry".
+    MAX_SLEEP = (2**31) - 1
+
     # @param headers [Hash] sent with every request (authentication, User-Agent)
     # @param instrumenter [#instrument] see Clicksend::Instrumentation
     def initialize(transport:, retry_policy:, headers: {}, logger: nil, instrumenter: Instrumentation::Null)
@@ -245,7 +250,7 @@ module Clicksend
 
       delay = @retry_policy.delay(error: error, attempt: attempt)
       delay = Float(delay) if delay.is_a?(Numeric)
-      delay if delay.is_a?(Float) && delay.finite? && delay >= 0
+      delay if delay.is_a?(Float) && delay.between?(0, MAX_SLEEP)
     rescue => e
       # A broken policy stops retrying (the safe direction) and keeps the
       # request's own error.

@@ -729,3 +729,36 @@ RSpec.describe Clicksend::Connection, "instrumenter lifecycle" do
     expect(transport.calls.size).to eq(1)
   end
 end
+
+RSpec.describe Clicksend::Connection, "delays that can't be slept" do
+  def connection(*outcomes, policy:)
+    @transport = FakeTransport.new(*outcomes)
+    described_class.new(transport: @transport, retry_policy: policy)
+  end
+
+  let(:ok) { FakeTransport.json(200, {"data" => {}}) }
+
+  it "raises the 429 instead of Kernel.sleep's RangeError when an unlimited policy meets a huge Retry-After" do
+    allow(Kernel).to receive(:sleep).and_call_original
+    huge = FakeTransport.json(429, "", headers: {"retry-after" => "99999999999999999999"})
+    policy = Clicksend::RetryPolicy.new(max_retry_after: Float::INFINITY)
+    expect { connection(huge, ok, policy: policy).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::RateLimitError) { |e|
+      expect(e.request.attempts).to eq(1)
+      expect(e).not_to be_ambiguous
+    }
+    expect(Kernel).not_to have_received(:sleep)
+  end
+
+  it "gives up on a custom policy's delay beyond what Kernel.sleep accepts, and still sleeps up to that limit" do
+    allow(Kernel).to receive(:sleep)
+    policy = Struct.new(:max_retries, :answer) { def delay(**) = answer }
+    [Clicksend::Connection::MAX_SLEEP + 1, 1e20].each do |answer|
+      expect { connection(FakeTransport.json(503, ""), ok, policy: policy.new(1, answer)).request(:get, "/v3/x", idempotent: true) }
+        .to raise_error(Clicksend::ServerError)
+    end
+    expect(Kernel).not_to have_received(:sleep)
+
+    expect(connection(FakeTransport.json(503, ""), ok, policy: policy.new(1, Clicksend::Connection::MAX_SLEEP)).request(:get, "/v3/x", idempotent: true).http_status).to eq(200)
+    expect(Kernel).to have_received(:sleep).with(2_147_483_647.0)
+  end
+end
