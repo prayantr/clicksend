@@ -24,6 +24,16 @@ Planned as 1.2.0. Additive.
   so tests must stub that answer. `fake.stub_history(*messages, status: "Sent")` states what
   history shows; the fake still serves no history by itself.
 
+### Fixed
+
+- **Instrumenters that don't run the block synchronously can no longer send late or return nil.**
+  A `request.clicksend` block kept by the instrumenter and called after `#instrument` returned
+  now raises `ConfigurationError` without sending (before, the call raised `ConfigurationError`
+  and the SMS was sent later anyway). If `#instrument` returns while the block is still running on
+  another thread, or after swallowing an exception that escaped the request, the call raises a
+  `ConfigurationError` that is also an `AmbiguousRequestError` unless the request is idempotent
+  (before, `Client#request` could return nil while the send went ahead).
+
 ### Changed
 
 - **Webhook documentation corrected from new evidence** (`Clicksend::Webhook` is still

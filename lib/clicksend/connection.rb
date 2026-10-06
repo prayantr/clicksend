@@ -71,37 +71,72 @@ module Clicksend
     # this, a metrics outage after an accepted send would surface as a
     # non-Clicksend error that a job runner retries: a duplicate SMS.
     #
-    # +state+ moves :pending -> :running -> :done. Only an exception that
-    # arrives once the request is :done can be the instrumenter's own, and
-    # only then is it ignored. Anything raised while the request is :running
-    # propagates: #run turns every failure it can foresee into a
-    # Clicksend::Error, so that is a genuine bug, never something to hide
-    # (hiding it once made #request return nil after an accepted send). A
-    # second call of the block raises instead of sending again.
+    # +state+ moves :pending -> :running -> :done, under a lock because an
+    # instrumenter may run the block on another thread. What it is when
+    # #instrument returns or raises decides the outcome:
+    #
+    # [:done]    the call's result or error. Any other exception can only be
+    #            the instrumenter's, and only then is it ignored.
+    # [:pending] nothing was sent. The block becomes :abandoned, so an
+    #            instrumenter that kept it and calls it later gets a
+    #            ConfigurationError instead of sending.
+    # [:running] the block was left unfinished. An exception that escaped the
+    #            request itself is a genuine bug and propagates: #run turns
+    #            every failure it can foresee into a Clicksend::Error, and
+    #            hiding one once made #request return nil after an accepted
+    #            send. Otherwise the block is still running on another thread
+    #            (or the instrumenter swallowed what it raised), so the
+    #            request may be or may yet be sent: a ConfigurationError,
+    #            ambiguous unless the request is idempotent.
+    #
+    # A second call of the block raises instead of sending again.
     def instrumented(call)
       payload = {http_method: call[:method], path: reported_path(call[:path]), operation: call[:operation], idempotent: call[:idempotent]}
+      lock = Mutex.new
       state = :pending
-      outcome = nil
+      outcome = escaped = failure = nil
       begin
         @instrumenter.instrument("request.clicksend", payload) do
-          raise ConfigurationError, "the instrumenter ran the request block twice; #instrument must yield once" unless state == :pending
+          lock.synchronize do
+            raise ConfigurationError, "the instrumenter ran the request block after #instrument returned; it must yield before returning" if state == :abandoned
+            raise ConfigurationError, "the instrumenter ran the request block twice; #instrument must yield once" unless state == :pending
 
-          state = :running
-          outcome = begin
+            state = :running
+          end
+          result = begin
             yield payload
           rescue Error => e
             e
+          rescue Exception => e # rubocop:disable Lint/RescueException
+            lock.synchronize { escaped = e }
+            raise
           end
-          state = :done
+          lock.synchronize { outcome, state = result, :done }
           # Raise inside the block so ActiveSupport records the exception.
-          outcome.is_a?(Error) ? raise(outcome) : outcome
+          result.is_a?(Error) ? raise(result) : result
         end
       rescue Exception => e # rubocop:disable Lint/RescueException
-        raise unless state == :done && e.is_a?(StandardError) && !e.equal?(outcome)
-
-        log(:warn) { "instrumenter raised #{e.class.name} for #{call[:method].upcase} #{reported_path(call[:path])}; ignored" }
+        failure = e
       end
-      raise ConfigurationError, "the instrumenter did not run the request: #instrument must yield" if state == :pending
+      final, escaped = lock.synchronize { [(state == :pending) ? (state = :abandoned) : state, escaped] }
+
+      case final
+      when :abandoned
+        raise failure if failure # the instrumenter failed before the request: nothing was sent
+
+        raise ConfigurationError, "the instrumenter did not run the request: #instrument must yield"
+      when :running
+        raise failure if failure&.equal?(escaped)
+
+        error = ConfigurationError.new("the instrumenter returned before the request finished; #instrument must run the block to completion before returning")
+        error.mark_ambiguous! unless call[:idempotent]
+        raise error, cause: failure
+      end
+      if failure && !failure.equal?(outcome)
+        raise failure unless failure.is_a?(StandardError)
+
+        log(:warn) { "instrumenter raised #{failure.class.name} for #{call[:method].upcase} #{reported_path(call[:path])}; ignored" }
+      end
       raise outcome if outcome.is_a?(Error)
 
       outcome
