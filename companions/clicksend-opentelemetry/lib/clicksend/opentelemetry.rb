@@ -134,12 +134,15 @@ module Clicksend
       end
 
       # Class, HTTP status, ClickSend's response_code and the request line:
-      # all already present in the request.clicksend payload.
+      # all already present in the request.clicksend payload. Without
+      # record_path the request line is the method alone.
       def safe_message(error)
         parts = [error.class.name]
         parts << "HTTP #{error.http_status}" if error.respond_to?(:http_status) && error.http_status
         parts << error.response_code if error.respond_to?(:response_code) && error.response_code.is_a?(String)
-        parts << "(#{error.request})" if error.is_a?(Clicksend::Error) && error.request
+        if error.is_a?(Clicksend::Error) && error.request
+          parts << (@record_path ? "(#{error.request})" : "(#{error.request.http_method.to_s.upcase})")
+        end
         parts.join(" ")
       end
 

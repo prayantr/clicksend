@@ -16,7 +16,7 @@ Planned as 0.1.0, the first release. Not yet published to RubyGems.
   span of kind CLIENT per ClickSend API call, retries included, named `clicksend <operation>`
   (`clicksend <METHOD>` when there is no operation). Attributes: `http.request.method`,
   `server.address`, `server.port`, `url.path` (never the query string; `record_path: false` leaves
-  it out), `http.response.status_code`, `error.type`, and `clicksend.operation`,
+  it out, and the path out of the exception event's message), `http.response.status_code`, `error.type`, and `clicksend.operation`,
   `clicksend.idempotent`, `clicksend.attempts`, `clicksend.ambiguous`, `clicksend.response_code`.
   Each retry is a `clicksend.retry` span event. A failed call sets the span status to ERROR and
   adds an `exception` event whose message is built only from the class, HTTP status, ClickSend's

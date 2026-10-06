@@ -69,6 +69,10 @@ RSpec.describe Clicksend::Transport::Faraday do
       expect(failure_for(SocketError.new("getaddrinfo")).request_may_have_been_sent?).to be(false)
     end
 
+    it "maps a DNS failure reported by its SocketError subclass (Ruby 3.3+) to not sent" do
+      expect(failure_for(Socket::ResolutionError.new("getaddrinfo(3): nodename nor servname provided")).request_may_have_been_sent?).to be(false)
+    end
+
     it "treats TLS errors as possibly sent (they can happen after the request was written)" do
       error = failure_for(OpenSSL::SSL::SSLError.new("SSL_read: unexpected eof while reading"))
       expect(error.request_may_have_been_sent?).to be(true)
@@ -124,6 +128,11 @@ RSpec.describe Clicksend::Transport::Faraday do
       down = raised_during(Errno::EHOSTDOWN.new, Net::HTTP::Persistent::Error, "host down: 127.0.0.1:1")
       expect(failure_from(Faraday::ConnectionFailed.new(down)).request_may_have_been_sent?).to be(true)
       expect(failure_from(Faraday::ConnectionFailed.new(Net::HTTP::Persistent::Error.new("connection refused: 127.0.0.1:1"))).request_may_have_been_sent?).to be(true)
+    end
+
+    it "unwraps the cause only for Net::HTTP::Persistent::Error (any other error raised while handling a refusal may follow the write)" do
+      other = raised_during(Errno::ECONNREFUSED.new, IOError, "closed stream")
+      expect(failure_from(Faraday::ConnectionFailed.new(other)).request_may_have_been_sent?).to be(true)
     end
 
     it "treats a connect timeout or a pool checkout timeout as a TimeoutError that was not sent" do

@@ -235,7 +235,7 @@ accepted. The gem never retries such a send. It raises the error extended with
 
 ```ruby
 begin
-  client.sms.deliver(to: user.phone, body: text, custom_string: "otp:#{attempt.id}")
+  client.sms.deliver(to: user.phone, body: text, custom_string: "otp:#{otp.id}")
 rescue Clicksend::AmbiguousRequestError => e
   e.class          # => Clicksend::TimeoutError (or ServerError, ConnectionError, MalformedResponseError,
                    #    or any APIError ClickSend reported inside a 2xx answer)
@@ -254,7 +254,7 @@ answer is ambiguous whatever its code, because that behaviour is undocumented.
 To check, search [history](#message-history) for your recipient and `custom_string`:
 
 ```ruby
-records = client.sms.search_history(to: user.phone, custom_string: "otp:#{attempt.id}", sent_after: started_at)
+records = client.sms.search_history(to: user.phone, custom_string: "otp:#{otp.id}", sent_after: started_at)
 records.any?  # true: ClickSend accepted it (records.first.status says how far it got)
               # false: nothing is known yet. This is NOT proof that it wasn't sent.
 ```
@@ -269,8 +269,9 @@ Each page of 100 rows is one request against ClickSend's undocumented rate limit
 ClickSend doesn't document how soon a sent message appears in history, keeps history for about
 four months, and can de-identify recipients on request, so **an empty result is not proof that
 nothing was sent**. Whether to resend is your decision: for a login code, letting the user
-request another is usually safer than resending automatically. Use a `custom_string` that is
-unique to the message (not to the attempt), so a match from an earlier attempt counts.
+request another is usually safer than resending automatically. Use a `custom_string` that names
+the message you meant to send (here the OTP record), not one try at sending it: a job that runs
+again reuses it, so a match from an earlier try counts.
 
 ## Delivery receipts and replies
 
@@ -623,8 +624,9 @@ So give jobs a client whose attempts end well inside the runner's shutdown timeo
 ```ruby
 # config/initializers/clicksend.rb
 CLICKSEND = Clicksend::Client.new(logger: Rails.logger, instrumenter: ActiveSupport::Notifications)
-# Sidekiq waits 25s by default (-t, :timeout). One attempt here takes at most about 5s to connect
-# plus 15s to answer, and max_retries: 0 leaves not-processed failures to retry_on.
+# Sidekiq waits 25s by default (-t, :timeout). One attempt here gives up after about 5s without a
+# connection or 15s without data from ClickSend (each read gets 15s, so an answer that trickles in
+# can take longer), and max_retries: 0 leaves not-processed failures to retry_on.
 CLICKSEND_JOBS = CLICKSEND.with(timeout: 15, max_retries: 0)
 ```
 

@@ -100,6 +100,15 @@ RSpec.describe Clicksend::OpenTelemetry::Instrumenter do
       expect(fake.requests.size).to eq(1)
     end
 
+    it "leaves the path out of the exception message too with record_path: false" do
+      fake.fail_next(status: 500, processed: false)
+      client = fake.client(instrumenter: described_class.new(record_path: false))
+      expect { client.sms.cancel("ABC-123") }.to raise_error(Clicksend::ServerError)
+      exception = clicksend_span.events.find { |e| e.name == "exception" }
+      expect(exception.attributes["exception.message"]).to eq("Clicksend::ServerError HTTP 500 INTERNAL_SERVER_ERROR (PUT)")
+      expect(clicksend_span.to_h.to_s).not_to include("ABC-123")
+    end
+
     it "keeps a send timeout ambiguous and single-attempt, with no HTTP status" do
       fake.fail_next(:timeout, processed: true)
       expect { traced_client.sms.deliver(to: phone, body: text) }.to raise_error(Clicksend::TimeoutError) { |e|

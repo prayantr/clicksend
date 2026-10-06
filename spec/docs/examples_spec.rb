@@ -47,7 +47,7 @@ RSpec.describe "Documentation examples" do
       fake.fail_next(:timeout, processed: true)
       scope = binding
       scope.local_variable_set(:user, Struct.new(:phone).new("+61411111111"))
-      scope.local_variable_set(:attempt, Struct.new(:id).new(42))
+      scope.local_variable_set(:otp, Struct.new(:id).new(42))
       scope.local_variable_set(:client, fake.client)
       scope.local_variable_set(:text, "Your code is 481516")
       code = readme_block("rescue Clicksend::AmbiguousRequestError => e")

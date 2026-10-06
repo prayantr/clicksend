@@ -50,7 +50,7 @@ CLICKSEND = Clicksend::Client.new(
 Options:
 - `base_url:` the client's `base_url`, if it isn't the default `https://rest.clicksend.com`. The
   instrumentation payload has no host, so `server.address` and `server.port` come from here.
-- `record_path: false` leaves out `url.path`. Paths never contain a query string, but some contain
+- `record_path: false` leaves out `url.path`, and the path in the exception event's message. Paths never contain a query string, but some contain
   a message ID (`sms.receipt`, `sms.cancel`), and paths you pass to `client.request` are recorded as
   you wrote them.
 

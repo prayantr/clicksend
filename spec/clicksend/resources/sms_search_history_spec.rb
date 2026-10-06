@@ -37,6 +37,12 @@ RSpec.describe Clicksend::Resources::SMS, "#search_history" do
     expect(stub).to have_been_requested
   end
 
+  it "accepts sent_before equal to sent_after (one instant, widened both ways)" do
+    stub = stub_api(:get, "/v3/sms/history", query: query(date_to: 1_700_000_000 + margin)).to_return(json_response(page_of([])))
+    client.sms.search_history(to: "+61411111111", custom_string: "otp:42", sent_after: 1_700_000_000, sent_before: 1_700_000_000)
+    expect(stub).to have_been_requested
+  end
+
   it "keeps only outbound rows whose recipient and custom_string are exactly the ones given" do
     rows = [
       row(message_id: "A"),
