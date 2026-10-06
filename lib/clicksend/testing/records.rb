@@ -9,9 +9,11 @@ module Clicksend
     SentMessage = Data.define(:message_id, :to, :from, :body, :custom_string, :list_id, :scheduled_at, :country, :sent_at)
 
     # Raised when test code given to the FakeAPI (a #stub block, or the
-    # +clock:+) fails. It is deliberately not a StandardError, so the client
-    # does not report it as a ClickSend failure (connection error, retry,
-    # "ambiguous" send): a typo in a stub must fail the test, not satisfy it.
+    # +clock:+) raises a StandardError or ScriptError, i.e. has a bug. It is
+    # deliberately not a StandardError, so the client does not report it as a
+    # ClickSend failure (connection error, retry, "ambiguous" send): a typo in
+    # a stub must fail the test, not satisfy it. Other exceptions (Ctrl-C,
+    # timeouts, assertion failures) are never converted.
     class StubError < Exception # rubocop:disable Lint/InheritException
     end
 

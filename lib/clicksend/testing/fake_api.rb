@@ -39,6 +39,10 @@ module Clicksend
 
       DECIMAL = /\A\d+(\.\d+)?\z/
       RECIPIENT = /\A\+?\d{6,15}\z/
+      # What a bug in a stub block or clock raises. Anything else (Interrupt,
+      # SystemExit, Timeout's internal exception, RSpec or Minitest assertion
+      # failures) is not a mistake in the fake's setup and passes through as is.
+      MISTAKES = [StandardError, ScriptError].freeze
       STATUS_TEXTS = {200 => "Sent", 201 => "Delivered", 300 => "Retrying", 301 => "Failed"}.freeze
       ROUTES = [
         [:post, %r{\A/v3/sms/send\z}, :send_sms],
@@ -50,7 +54,7 @@ module Clicksend
         [:put, %r{\A/v3/sms/inbound-read\z}, :mark_inbound_read],
         [:put, %r{\A/v3/sms/inbound-read/([A-Za-z0-9-]+)\z}, :mark_inbound_message_read]
       ].freeze
-      private_constant :DECIMAL, :RECIPIENT, :STATUS_TEXTS, :ROUTES
+      private_constant :DECIMAL, :RECIPIENT, :MISTAKES, :STATUS_TEXTS, :ROUTES
 
       # @param balance [String] the account balance, as ClickSend's decimal String
       # @param currency [String] e.g. "AUD"
@@ -282,7 +286,7 @@ module Clicksend
       def stubbed(stub, request)
         result = begin
           stub.call(request)
-        rescue Exception => e # rubocop:disable Lint/RescueException
+        rescue *MISTAKES => e
           raise StubError, "the FakeAPI stub for #{request.http_method.upcase} #{request.path} raised #{e.class}: #{e.message}"
         end
         return result if result.is_a?(Transport::Response)
@@ -389,7 +393,7 @@ module Clicksend
       # The clock is test code: its failures are the test's, not ClickSend's.
       def now
         @clock.call
-      rescue Exception => e # rubocop:disable Lint/RescueException
+      rescue *MISTAKES => e
         raise StubError, "the FakeAPI clock raised #{e.class}: #{e.message}"
       end
 

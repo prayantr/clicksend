@@ -251,3 +251,50 @@ RSpec.describe Clicksend::Testing::FakeAPI do
     expect { fake.client.sms.history }.to raise_error(Clicksend::NotFoundError)
   end
 end
+
+RSpec.describe Clicksend::Testing::FakeAPI, "exceptions that are not stub mistakes" do
+  require "clicksend/testing"
+  require "timeout"
+
+  let(:fake) { described_class.new }
+
+  def stub_raising(error)
+    fake.stub(:get, "/v3/sms/templates") { |_request| raise error }
+  end
+
+  it "lets Interrupt (Ctrl-C) through unchanged" do
+    stub_raising(Interrupt.new)
+    expect { fake.client.request(:get, "/v3/sms/templates") }.to raise_error(Interrupt)
+  end
+
+  it "lets SystemExit through unchanged" do
+    stub_raising(SystemExit.new(1))
+    expect { fake.client.request(:get, "/v3/sms/templates") }.to raise_error(SystemExit)
+  end
+
+  it "lets Timeout.timeout interrupt a slow stub as a Timeout::Error" do
+    fake.stub(:get, "/v3/sms/templates") { |_request| sleep 1 }
+    expect { Timeout.timeout(0.05) { fake.client.request(:get, "/v3/sms/templates") } }.to raise_error(Timeout::Error)
+  end
+
+  it "lets an RSpec expectation failure inside a stub through as an expectation failure" do
+    fake.stub(:get, "/v3/sms/templates") do |request|
+      expect(request.query).to eq("page" => "2")
+      {"data" => {}}
+    end
+    expect { fake.client.request(:get, "/v3/sms/templates", query: {page: 1}) }
+      .to raise_error(RSpec::Expectations::ExpectationNotMetError)
+  end
+
+  it "lets the same exceptions through from the clock" do
+    clock_interrupted = described_class.new(clock: -> { raise Interrupt })
+    expect { clock_interrupted.client.sms.deliver(to: "+61411111111", body: "hi") }.to raise_error(Interrupt)
+  end
+
+  it "still turns a bug in a stub (StandardError or ScriptError) into StubError" do
+    stub_raising(NotImplementedError.new("todo"))
+    expect { fake.client.request(:get, "/v3/sms/templates") }.to raise_error(Clicksend::Testing::StubError, /NotImplementedError: todo/)
+    stub_raising(KeyError.new("missing"))
+    expect { fake.client.request(:get, "/v3/sms/templates") }.to raise_error(Clicksend::Testing::StubError, /KeyError: missing/)
+  end
+end
