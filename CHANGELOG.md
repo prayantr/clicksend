@@ -6,7 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Planned as 1.2.0. Additive.
+Planned as 1.2.0. Mostly additive. "Fixed" lists behaviour changes an existing application may
+notice, such as `Marshal.dump(client)` now raising and stricter `Retry-After` parsing.
 
 ### Added
 
@@ -119,8 +120,8 @@ Planned as 1.2.0. Additive.
   can hold message IDs), and a Rails 8.1 `Rails.event` bridge. The OpenTelemetry warning now names
   what the stock Faraday and Net::HTTP instrumentations record (the query string, with the
   recipient's number from `sms.history(to:)`) and how to exclude ClickSend from them.
-- Persistent connections: the measured benefit (local benchmark) and its costs, without
-  promising how pre-send failures are classified.
+- Persistent connections: the measured benefit (local benchmark), the pool-size rule, and which
+  failures are retried under that adapter (see "Fixed").
 - The companion gem `clicksend-opentelemetry` 0.1.0, in `companions/clicksend-opentelemetry`, is
   versioned and released separately and is not yet on RubyGems: one OpenTelemetry span per
   ClickSend call, built on the `instrumenter:` hook, with no query strings, bodies or phone
@@ -132,6 +133,8 @@ Planned as 1.2.0. Additive.
 - Webhook replay fixtures (`spec/fixtures/webhooks`, one per published push shape, replayed
   through Rack's request parsing) and `script/webhook_capture.rb`, which captures real pushes
   locally and redacts them into fixtures. `rack` is a new development dependency.
+- `minitest` is now declared as a development dependency (it was only pulled in through
+  activesupport); the Minitest assertions are tested inside real `Minitest::Test` cases.
 - `faraday-net_http_persistent` is a new development dependency:
   `spec/integration/persistent_connection_spec.rb` runs that adapter on real sockets (plain and
   TLS) and pins that a reused connection failing after the write never hides a retry of a POST or

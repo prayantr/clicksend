@@ -902,13 +902,14 @@ CLICKSEND = Clicksend::Client.new(adapter: [:net_http_persistent, {pool_size: th
 ```
 
 The pool must be **at least as large as the number of threads sharing the client** (Puma's
-threads, Sidekiq's concurrency). A thread that can't get a connection in time fails with a timeout,
-and a send that fails that way may be reported as ambiguous although nothing was sent: in the same
-local benchmark, 31 of 400 sends from 8 threads sharing `pool_size: 2` failed this way. With this adapter,
-a refused connection or connect timeout may also be reported as possibly sent. None of these sends
-anything twice, but each can leave a message unsent that the default adapter would have retried,
-and gives you a send to reconcile. Build the client once (`with` creates a new pool), and note that
-this adapter isn't part of this gem's test suite.
+threads, Sidekiq's concurrency). A thread that can't get a connection in time fails with a timeout:
+in the same local benchmark, 31 of 400 sends from 8 threads sharing `pool_size: 2` timed out
+waiting. Since 1.2 the gem recognises that wait, a refused connection and a connect timeout under
+this adapter as "not sent", so they are retried like any other failure that never reached
+ClickSend, but each still uses up a retry and adds latency. TLS errors and connection resets stay
+"possibly sent", because the adapter can raise them after the request was written. Build the
+client once (`with` creates a new pool). A real-socket spec in this gem's suite checks that the
+adapter never repeats a send by itself.
 
 ## Testing your application
 
