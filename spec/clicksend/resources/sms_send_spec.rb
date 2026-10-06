@@ -56,7 +56,8 @@ RSpec.describe Clicksend::Resources::SMS, "sending" do
       expect { client.sms.deliver(to: "+6100", body: "hi") }.to raise_error(Clicksend::MessageRejected) { |error|
         expect(error.status).to eq("INVALID_RECIPIENT")
         expect(error.result).to be_a(Clicksend::SMS::Message)
-        expect(error.message).to eq("ClickSend rejected the message: INVALID_RECIPIENT")
+        expect(error.message).to eq("ClickSend rejected the message: INVALID_RECIPIENT (POST /v3/sms/send)")
+        expect(error.request.operation).to eq("sms.deliver")
       }
     end
 
@@ -72,7 +73,11 @@ RSpec.describe Clicksend::Resources::SMS, "sending" do
       allow(Kernel).to receive(:sleep)
       stub = stub_api(:post, "/v3/sms/send").to_raise(Net::ReadTimeout)
       expect { client.sms.deliver(to: "+61411111111", body: "hi") }
-        .to raise_error(Clicksend::TimeoutError) { |e| expect(e.request_may_have_been_sent?).to be(true) }
+        .to raise_error(Clicksend::AmbiguousRequestError) { |e|
+          expect(e).to be_a(Clicksend::TimeoutError)
+          expect(e.request_may_have_been_sent?).to be(true)
+          expect(e.request.operation).to eq("sms.deliver")
+        }
       expect(stub).to have_been_requested.once
     end
 
@@ -83,6 +88,31 @@ RSpec.describe Clicksend::Resources::SMS, "sending" do
 
       stub_api(:post, "/v3/sms/send").to_return(json_response(envelope({"total_count" => 1})))
       expect { client.sms.deliver(to: "+61411111111", body: "hi") }.to raise_error(Clicksend::MalformedResponseError, /no messages list/)
+    end
+
+    it "treats an unreadable send result as ambiguous: ClickSend answered 2xx, so messages may have been queued" do
+      stub_api(:post, "/v3/sms/send").to_return(json_response(send_response([], blocked: 1)))
+      expect { client.sms.deliver(to: "+61411111111", body: "hi") }.to raise_error(Clicksend::AmbiguousRequestError) { |e|
+        expect(e).to be_a(Clicksend::MalformedResponseError)
+        expect(e.request).to have_attributes(path: "/v3/sms/send", operation: "sms.deliver", attempts: 1)
+        expect(e.message).to end_with("(POST /v3/sms/send)")
+      }
+
+      stub_api(:post, "/v3/sms/send").to_return(json_response(envelope({"total_count" => 1})))
+      expect { client.sms.deliver_batch([{to: "+61411111111", body: "hi"}]) }.to raise_error(Clicksend::AmbiguousRequestError) { |e|
+        expect(e.request.operation).to eq("sms.deliver_batch")
+      }
+
+      stub_api(:post, "/v3/sms/send").to_return(status: 200, body: "<html>maintenance</html>")
+      expect { client.sms.deliver(to: "+61411111111", body: "hi") }.to raise_error(Clicksend::MalformedResponseError) { |e| expect(e).to be_ambiguous }
+    end
+
+    it "does not mark a rejected message ambiguous: ClickSend decided" do
+      stub_api(:post, "/v3/sms/send").to_return(json_response(send_response([message_payload(to: "+000", status: "INVALID_RECIPIENT")])))
+      expect { client.sms.deliver(to: "+000", body: "hi") }.to raise_error(Clicksend::MessageRejected) { |e|
+        expect(e).not_to be_ambiguous
+        expect(e).not_to be_retryable
+      }
     end
 
     it "validates arguments before calling ClickSend" do
@@ -156,6 +186,21 @@ RSpec.describe Clicksend::Resources::SMS, "sending" do
       expect { client.sms.deliver_batch([{to: "+61411111111", body: "a"}], to: "+61400000000") }
         .to raise_error(ArgumentError, /unknown default\(s\) :to/)
       expect(a_request(:any, /clicksend/)).not_to have_been_made
+    end
+  end
+end
+
+RSpec.describe Clicksend::Resources::SMS, "send results without a readable status" do
+  def result(messages)
+    envelope({"total_count" => messages.size, "queued_count" => 0, "messages" => messages})
+  end
+
+  [nil, "", 1].each do |status|
+    it "treats a message with status #{status.inspect} as ambiguous, not rejected (it may have been queued)" do
+      message = {"message_id" => "A1", "to" => "+61411111111", "status" => status}.compact
+      stub_api(:post, "/v3/sms/send").to_return(json_response(result([message])))
+      expect { client.sms.deliver(to: "+61411111111", body: "hi") }.to raise_error(Clicksend::MalformedResponseError) { |e| expect(e).to be_ambiguous }
+      expect { client.sms.deliver_batch([{to: "+61411111111", body: "hi"}]) }.to raise_error(Clicksend::AmbiguousRequestError)
     end
   end
 end

@@ -43,6 +43,10 @@ RSpec.describe "SMS send safety (real HTTP stack)" do
       serve(behaviour, :ok)
       expect { deliver(local_client) }.to raise_error(error_class) { |error|
         expect(error.request_may_have_been_sent?).to be(true) if error.is_a?(Clicksend::ConnectionError)
+        expect(error).to be_a(Clicksend::AmbiguousRequestError)
+        expect(error).to be_ambiguous
+        expect(error).not_to be_retryable
+        expect(error.request).to have_attributes(http_method: :post, path: "/v3/sms/send", operation: "sms.deliver", idempotent: false, attempts: 1)
       }
       expect(@server.requests).to eq(["POST /v3/sms/send HTTP/1.1"])
     end
@@ -57,7 +61,10 @@ RSpec.describe "SMS send safety (real HTTP stack)" do
   it "sends exactly once when the TLS handshake fails (TLS errors count as possibly sent)" do
     serve(:not_tls, :ok)
     expect { deliver(local_client(scheme: "https")) }
-      .to raise_error(Clicksend::ConnectionError) { |error| expect(error.request_may_have_been_sent?).to be(true) }
+      .to raise_error(Clicksend::ConnectionError) { |error|
+        expect(error.request_may_have_been_sent?).to be(true)
+        expect(error).to be_a(Clicksend::AmbiguousRequestError)
+      }
     expect(@server.connections).to eq(1)
   end
 
@@ -71,7 +78,12 @@ RSpec.describe "SMS send safety (real HTTP stack)" do
     port = TCPServer.open("127.0.0.1", 0) { |probe| probe.addr[1] } # now closed: nothing listens there
     log = StringIO.new
     client = Clicksend::Client.new(username: "u", api_key: "k", base_url: "http://127.0.0.1:#{port}", max_retries: 2, logger: Logger.new(log))
-    expect { deliver(client) }.to raise_error(Clicksend::ConnectionError) { |e| expect(e.request_may_have_been_sent?).to be(false) }
+    expect { deliver(client) }.to raise_error(Clicksend::ConnectionError) { |e|
+      expect(e.request_may_have_been_sent?).to be(false)
+      expect(e).not_to be_ambiguous
+      expect(e).to be_retryable
+      expect(e.request.attempts).to eq(3)
+    }
     expect(log.string.scan("retrying").size).to eq(2)
   end
 

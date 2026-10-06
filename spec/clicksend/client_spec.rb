@@ -60,6 +60,36 @@ RSpec.describe Clicksend::Client do
     it "rejects unknown settings" do
       expect { client.with(timout: 3) }.to raise_error(ArgumentError, /timout/)
     end
+
+    it "replaces the retry policy when max_retries is overridden, and vice versa" do
+      policy = Clicksend::RetryPolicy.new(max_retries: 5)
+      with_policy = client(retry_policy: policy)
+      expect(with_policy.with(max_retries: 1).max_retries).to eq(1)
+      expect(client(max_retries: 1).with(retry_policy: policy).retry_policy).to be(policy)
+      expect(with_policy.with(timeout: 3).retry_policy).to be(policy)
+    end
+
+    it "keeps the instrumenter" do
+      instrumenter = Clicksend::Instrumentation::Null
+      expect(client(instrumenter: instrumenter).with(timeout: 3).instrumenter).to be(instrumenter)
+    end
+  end
+
+  describe "retry configuration" do
+    it "builds a RetryPolicy from max_retries" do
+      expect(client(max_retries: 4).retry_policy).to have_attributes(class: Clicksend::RetryPolicy, max_retries: 4)
+      expect(client.retry_policy.max_retries).to eq(2)
+    end
+
+    it "accepts any policy object with #delay and #max_retries" do
+      custom = Struct.new(:max_retries) { def delay(**) = 0 }.new(1)
+      expect(client(retry_policy: custom).max_retries).to eq(1)
+    end
+
+    it "rejects both settings at once, and objects that are not policies" do
+      expect { client(max_retries: 1, retry_policy: Clicksend::RetryPolicy.new) }.to raise_error(Clicksend::ConfigurationError, /not both/)
+      expect { client(retry_policy: Object.new) }.to raise_error(Clicksend::ConfigurationError, /retry_policy/)
+    end
   end
 
   describe "secrecy" do

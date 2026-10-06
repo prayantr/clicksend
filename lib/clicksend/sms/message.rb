@@ -29,7 +29,7 @@ module Clicksend
           parts: Model.integer(payload["message_parts"]),
           price: Model.decimal(payload["message_price"]),
           custom_string: Model.string(payload["custom_string"]),
-          list_id: Model.string(payload["list_id"]) || Model.integer(payload["list_id"])&.to_s,
+          list_id: Model.code(payload["list_id"]),
           country: Model.string(payload["country"]),
           carrier: Model.string(payload["carrier"]),
           sent_at: Model.time(payload["date"]),

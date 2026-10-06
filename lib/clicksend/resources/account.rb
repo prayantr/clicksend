@@ -15,7 +15,7 @@ module Clicksend
       #
       # @return [Clicksend::Account]
       def fetch
-        Clicksend::Account.from_api(@client.request(:get, "/v3/account").data)
+        Clicksend::Account.from_api(@client.request(:get, "/v3/account", operation: "account.fetch").data)
       end
 
       def inspect

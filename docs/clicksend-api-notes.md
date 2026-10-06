@@ -1,14 +1,19 @@
 # ClickSend API notes
 
 How this gem interprets ClickSend's REST v3 documentation, where that documentation is
-ambiguous, and what the live API actually did. Last reviewed 2026-10-05, including live runs
-that covered sending but did not observe a delivery receipt (see "Live verification").
+ambiguous, and what the live API actually did. Last reviewed 2026-10-06: the documentation
+review covered all 34 OpenAPI sections, and the live runs on 2026-10-05 and 2026-10-06 (see
+"Live verification") covered sending and read-only history and rate-limit checks, but no
+delivery receipt.
 
 Sources:
 - [API reference](https://developers.clicksend.com/docs/), with its OpenAPI files at
   `https://developers.clicksend.com/docs/_spec/<section>.yaml`
 - [Testing](https://developers.clicksend.com/docs/testing)
 - [SMS error codes](https://help.clicksend.com/en/articles/42318-sms-error-codes)
+- Superseded but still informative: the [legacy HTTP v2 docs](https://developers.clicksend.com/docs/http/v2/)
+  and the [archived REST v3 docs](https://web.archive.org/web/20220502204655/https://developers.clicksend.com/docs/rest/v3/)
+  (2022), the only sources that list the fields ClickSend pushes to webhook URLs
 
 ## Behaviour taken from the documentation
 
@@ -20,13 +25,19 @@ Sources:
 | Per-message status | `/sms/send` `http_code` "doesn't reflect the status of each message" | `MessageRejected` (single) / `Batch#rejected` |
 | Pagination | `page` (default 1) and `limit` (default 15, min 15, max 100); `total`, `per_page`, `current_page`, `last_page` | `Page`; `limit` checked against 15..100 |
 | Receipt status codes | 200 sent/queued, 201 delivered, 300 temporary failure (ClickSend retries), 301 failed | `pending?` / `delivered?` / `failed?` |
-| Unread-only lists | Receipts and inbound marked read "won't be shown" in the list endpoints | Documented in the README (paging pitfall) |
+| Unread-only lists | Receipts and inbound marked read "won't be shown" in the list endpoints. Listing does not mark anything read (archived docs) | Documented in the README (paging pitfall) |
 | POLL rules | Polling receipts and inbound requires a rule with the POLL action | Documented |
-| Mark-read cutoff | `date_before`, Unix timestamp, optional | `before:` (Time or Integer); `{}` when omitted, which matches the request schema |
-| Unicode | Detected automatically; no `messagetype` in v3 | Not exposed |
+| Mark-read cutoff | `date_before`, Unix timestamp, optional. Without it, **everything** is marked read ("mark all", and the archived "If not given, all messages will be marked as read") | `before:` (Time or Integer); `{}` when omitted. Since 1.1 retried only with a cutoff (see "Retry safety") |
+| Per-receipt mark-read | None: receipts can only be marked read by cutoff. Inbound messages have `PUT /v3/sms/inbound-read/{message_id}` | `mark_inbound_message_read` only |
+| Unicode | Detected automatically **if** the account's dashboard setting is "Autodetect" (help 42194); no `messagetype` in v3 | Not exposed |
 | URLs in SMS | Paused for new customers pending approval | Documented |
-| Test numbers | e.g. `+61411111111`: "No messages will be sent, and your account won't be charged" | Used by the live specs. **Live:** still subject to the account's enabled countries (see below) |
-| Idempotency | No idempotency key on any send operation | Sends are never retried after timeouts or 5xx |
+| Test numbers | e.g. `+61411111111`: "No messages will be sent, and your account won't be charged". The legacy v2 docs add: "A delivery report won't be generated when using a test number" | Used by the live specs. **Live:** still subject to the account's enabled countries, and no receipt (see below) |
+| Idempotency | No idempotency key on any operation (all 34 sections searched) | Sends are never retried after timeouts or 5xx |
+| `THROTTLED` | Application code: "Identical message body recently sent to the same recipient." Window and placement undocumented | Treated as an ordinary rejection; never relied on for deduplication |
+| History search | `GET /v3/sms/history`: `date_from`, `date_to`, `order_by` (`date:asc` default), `page`, `limit`, and `q=field:value` for `status`, `to`, `from`, `subaccount_id`, `message_id`. `custom_string` is **not** a filter | `sms.history` takes one of `to:`, `from:`, `status:`, `message_id:`; match `custom_string` yourself |
+| Webhooks (push) | Automation rules with the `URL` action. Inbound rules: `webhook_type` `post` (form, default), `get` or `json` (format unspecified). Receipts: form-encoded POST according to the archived v3 docs (help 42270 covers inbound rules only). **No payload schema** in the current docs; the archived docs list the fields, matching the poll schemas plus `user_id` and (receipts) `status`. Archived: a non-200 is retried every 10 minutes, 10 times | `Clicksend::Webhook` parses into `SMS::Receipt` / `SMS::InboundMessage` |
+| Webhook authentication | **None documented.** No signature, HMAC or shared secret in any current, archived or help source. Current docs list no source IP addresses; archived help pages (around 2019–2021, no longer published) listed six and said pushes come from a fixed pool | No verification method and no IP allowlisting; README prescribes a secret URL and confirming via the API |
+| Request ID | None documented; no spec declares any response header | `Error#request` describes the call instead |
 
 ## Ambiguities and inconsistencies
 
@@ -51,14 +62,15 @@ These were found by the contract specs (`bundle exec rake contract`), which pin 
    until this is verified; use `client.request`.
 8. **Inbound mark-read example.** The request example sends `date_before` as a string
    (`"1961900166"`); the schema says integer. The gem sends an integer.
-9. **Batch size.** "Up to 1000 messages" appears only in a code-sample comment, not in the schema.
-   Not enforced.
+9. **Batch size.** "Up to 1000 messages" appears in a code-sample comment and in the archived 2022
+   docs, not in the current schema. Not enforced.
 10. **Blocked messages.** `blocked_count` is documented, but not whether blocked messages also
     appear in `messages[]`. **Live: they do** (a `COUNTRY_NOT_ENABLED` message was listed and
     counted in `blocked_count`). `Batch#all_queued?` checks both.
-11. **Rate limits.** 429 is documented, but the referenced "Rate Limiting" section doesn't exist.
-    See the live results below for what the API actually sends. The gem honours `Retry-After`
-    and doesn't depend on the other headers.
+11. **Rate limits.** 429 is documented, but the referenced "Rate Limiting" section doesn't exist
+    (nor in the 2022 archive). See the live results below for what the API actually sends. The
+    gem honours `Retry-After`, and since 1.1 exposes the other observed headers as
+    `Response#rate_limit` / `APIError#rate_limit`, without depending on them.
 12. **Error HTTP statuses.** The docs list application codes such as `INVALID_RECIPIENT` and
     `INSUFFICIENT_CREDIT` but not which HTTP status accompanies them. **Live:** on `/sms/send`,
     `INVALID_RECIPIENT` and `COUNTRY_NOT_ENABLED` are per-message statuses inside an HTTP 200, not
@@ -67,6 +79,12 @@ These were found by the contract specs (`bundle exec rake contract`), which pin 
     live response, include `_subaccount.api_key`. `Account#raw` replaces that value with
     `"[REDACTED]"`. The escape hatch returns bodies verbatim, so `client.request(:get,
     "/v3/account").body` contains the key and must not be logged.
+14. **History example.** The `view-sms-history` example uses `status: 200` instead of `http_code` and
+    omits the pagination wrapper the schema declares. **Live: the schema is right** (paginated
+    envelope). History `status_code` is documented as a string; live it was `null` for a
+    test-number message.
+15. **Help links.** The receipt and inbound-URL help links inside `sms.yaml` now redirect to
+    unrelated articles.
 
 ## Defensive behaviour (not documented for v3)
 
@@ -120,6 +138,13 @@ account. This was the only send in the run, and retries were off.
 Receipt retrieval and parsing are therefore verified against ClickSend's published examples and
 the contract specs only, **not** against a live receipt.
 
+### Read-only checks (2026-10-06)
+
+| Behaviour | Live result |
+|---|---|
+| `GET /v3/sms/history?q=to:%2B61411111111&date_from=…&order_by=date:asc&limit=100` (`sms.history(to:, date_from:)`) | HTTP 200, paginated envelope. Exactly one row, the accepted test-number message from 2026-10-05, so `q=to:` filters and the encoded `+` works. Row: `direction: "out"`, `status: "Completed"`, `status_code: null`, `status_text: null`, `message_parts: 0`, `message_price: "0.0000"`, `custom_string` a String, `date` an Integer, `schedule` a String. The documented fields, plus `contact_id`, `user_id`, `subaccount_id`, `first_name`, `last_name`, `_api_username` |
+| `GET /v3/account` rate-limit headers through `Response#rate_limit` | `limit: 20`, `remaining` and `reset_in` Integers |
+
 ### Still unverified
 
 These need a receipt for a real (non-test) message, existing inbound messages, or the public
@@ -129,8 +154,12 @@ test accounts:
 - [ ] Inbound timestamp field (`timestamp` or `timestamp_send`); no inbound messages existed
 - [ ] HTTP status and `response_code` for the `nocredit`, `notactive` and `banned` test accounts
 - [ ] Whether mark-read accepts an empty `{}` body. Deliberately not tested, because it would
-      mark every unread item read. The gem sends `{}` when `before:` is omitted; the request
-      schema allows it.
+      mark every unread item read (documented). The gem sends `{}` when `before:` is omitted; the
+      request schema allows it.
+- [ ] A real webhook push: its content type, field names and types. Field names come from the
+      poll schemas and the archived docs
+- [ ] How soon a sent message appears in history, and whether `date_from`/`date_to` are inclusive
+- [ ] Where and when `THROTTLED` is returned
 - [ ] Rate limits for endpoints other than `GET /v3/account`
 
 ## Retry safety: the rules and why
@@ -143,12 +172,19 @@ knows the first attempt did not reach ClickSend, or that ClickSend did not act o
 | 429 | ClickSend documents it as "a request cannot be served due to the application's rate limit". Inferred, not documented: the observed body (`"Too many attempts."`) looks like a throttling layer's response, produced before the request is handled | every method, honouring `Retry-After` up to 30s |
 | Connection refused, DNS failure, connect timeout (`Net::OpenTimeout`) | These can only happen before the request is written | every method |
 | Read timeout, connection reset, broken pipe, unreachable host mid-request | The request may have been written and processed | idempotent requests only |
+| Mark-read **without** a cutoff | "Mark everything read" is evaluated when ClickSend processes it, so a repeat can hide items that arrived in between | never (since 1.1); with a cutoff it is idempotent |
 | TLS errors | Usually a handshake failure (not sent), but `OpenSSL::SSL::SSLError` also covers failures after the request was written | idempotent requests only |
 | 5xx | ClickSend may have acted before failing | idempotent requests only |
 | Error reported only inside a 2xx body | Undocumented | never |
 
-"Idempotent" means `GET`, plus the gem's mark-read calls. `client.request` assumes only `GET`,
-because ClickSend uses `POST` and `PUT` for sends, purchases and credit transfers.
+"Idempotent" means `GET`, the mark-read calls that have a cutoff, and marking one inbound message
+read. `client.request` assumes only `GET`, because ClickSend uses `POST` and `PUT` for sends,
+purchases and credit transfers.
+
+Since 1.1 this rule lives in the connection and cannot be changed by configuration: a custom
+`retry_policy` only chooses delays and the retry budget. When a non-idempotent request fails in
+a way that may have been processed (a row above marked "idempotent requests only" or "never", or
+a 2xx answer the gem cannot read), the error is extended with `Clicksend::AmbiguousRequestError`.
 
 Underneath the gem there are no hidden retries. `Net::HTTP` retries `GET`/`PUT`/`DELETE`
 itself unless `max_retries` is 0, and faraday-net_http sets it to 0.

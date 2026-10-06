@@ -196,6 +196,31 @@ RSpec.describe "ClickSend live API", :live, order: :defined do
     end
   end
 
+  # --- read-only: history and rate-limit headers (1.1) ------------------------
+
+  it "L19 GET /v3/sms/history filtered to the test number (read-only)" do
+    since = Time.utc(2026, 10, 5)
+    records = client.sms.history(to: LiveSpec::TEST_NUMBER, date_from: since, limit: 100).auto_paging_each.first(200)
+    observe("history.test_number", {
+      rows: records.size,
+      all_to_test_number: records.all? { |r| r.to == LiveSpec::TEST_NUMBER },
+      directions: records.map(&:direction).tally,
+      statuses: records.map(&:status).tally,
+      status_codes: records.map(&:status_code).tally,
+      with_live_test_custom_string: records.count { |r| r.custom_string == "live-test" },
+      first_shape: records.first && shape(records.first.raw)
+    })
+    expect(records).to all(be_a(Clicksend::SMS::HistoryRecord))
+    expect(records.map(&:to).uniq - [LiveSpec::TEST_NUMBER]).to eq([])
+  end
+
+  it "L20 rate-limit headers on GET /v3/account, as Response#rate_limit (read-only)" do
+    response = client.request(:get, "/v3/account", operation: "live.rate_limit")
+    rate_limit = response.rate_limit
+    observe("account.rate_limit", rate_limit && {limit: rate_limit.limit, remaining_is_integer: rate_limit.remaining.is_a?(Integer), reset_in_is_integer: rate_limit.reset_in.is_a?(Integer)})
+    observe("account.request_info", {operation: response.request.operation, attempts: response.request.attempts})
+  end
+
   # --- unauthenticated rate limit (last) --------------------------------------
 
   it "L18 unauthenticated GET /v3/account until 429 (at most 25 requests)", :no_credentials do
