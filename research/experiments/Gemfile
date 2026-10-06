@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+
+# Throwaway experiments for research/1.2-ruby-ecosystem-proposal.md. Not part
+# of the gem, its test suite or CI. See each script's header for how to run it.
+source "https://rubygems.org"
+
+gem "clicksend", path: "../.."
+gem "activejob", "~> 8.1"
+gem "activerecord", "~> 8.1"
+gem "activesupport", "~> 8.1"
+gem "sqlite3"
+gem "sidekiq", ">= 8.0"
+gem "rspec", "~> 3.13"
+gem "opentelemetry-sdk"
+gem "opentelemetry-instrumentation-faraday"
