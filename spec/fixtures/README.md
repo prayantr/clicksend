@@ -27,3 +27,15 @@ for, are built inline in the specs that use them.
 
 `bundle exec rake contract` fails if ClickSend changes an example these files
 were generated from.
+
+## Webhook (push) fixtures
+
+`webhook_receipt.json` and `webhook_inbound.json` are **hand-written**, not generated and not
+captured from a live push. ClickSend's current documentation defines no push payload. The field
+lists come from the archived REST v3 docs ("Push Delivery Receipts" and "Push Inbound SMS",
+Wayback snapshot of 2022-05-02), and agree with the current poll schemas (`sms_receipt`,
+`inbound_sms`) apart from `status` and `user_id` (and `subaccount_id` on inbound), which only the
+archived docs list. Every value is a String, as a form-encoded POST arrives in Rack. The empty
+`error_code`/`error_text` assume a null is sent as an empty field (undocumented). Phone numbers
+are ClickSend test numbers and the IDs are made up. `spec/contract/webhook_contract_spec.rb`
+checks the field names against ClickSend's current schemas.
