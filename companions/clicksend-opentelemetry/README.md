@@ -91,8 +91,13 @@ gem's span (Net::HTTP's own span is then suppressed). With only
 span. **Those spans record the query string** (`url.full` or `url.query`), and
 `sms.history(to:)` and `sms.search_history` put the recipient's phone number there
 (`q=to:+61...`). Those instrumentations also send a `traceparent` header to ClickSend. This gem
-can't change what they record: configure them, or don't install them for an application that
-calls history by number.
+can't change what they record. With `opentelemetry-instrumentation-net_http` 0.29.1 and
+`-faraday` 0.33.0 (checked):
+- `untraced_hosts: ["rest.clicksend.com"]` on the Net::HTTP instrumentation drops its spans for
+  ClickSend and keeps this gem's span;
+- the Faraday instrumentation has no such option, so don't enable it in an application that
+  calls history by number. `OpenTelemetry::Common::Utilities.untraced { ... }` around a call
+  suppresses the Faraday span, but this gem's span too.
 
 ## Guarantees
 
