@@ -4,6 +4,65 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Planned as 1.1.0. Additive, apart from the two changes under "Changed".
+
+### Added
+
+- **Explicit ambiguity.** When a request that is not safe to repeat (such as an SMS send) fails
+  in a way that ClickSend may still have processed, the error is extended with
+  `Clicksend::AmbiguousRequestError`. That covers a timeout or reset after the request may have
+  been written, a 5xx, an error reported inside a 2xx body, and an unreadable 2xx answer. The
+  error keeps its class, so existing `rescue` clauses still work. `Error#ambiguous?` is the
+  predicate.
+- **Request context on errors and responses.** `Error#request` and `Response#request` return a
+  `Clicksend::RequestInfo` with `method`, `path` (no query string), `operation` (e.g.
+  `"sms.deliver"`), `idempotent` and `attempts`.
+- `Error#retryable?`: whether repeating the same request later is both safe and might succeed.
+- **Retry configuration.** `Clicksend::RetryPolicy` is public:
+  `Client.new(retry_policy: RetryPolicy.new(max_retries:, base_delay:, max_delay:, max_retry_after:))`.
+  The rule deciding *which* failures may be retried now lives in the connection and cannot be
+  changed by any policy.
+- **Rate limits.** `Response#rate_limit` and `APIError#rate_limit` return a `Clicksend::RateLimit`
+  (`limit`, `remaining`, `reset_in`, `reset_at`) from the rate-limit headers observed live. They
+  are nil when ClickSend sends none; ClickSend doesn't document these headers.
+- **Instrumentation.** `Client.new(instrumenter:)` accepts `ActiveSupport::Notifications` or any
+  object with the same `instrument` signature. It publishes `request.clicksend` and
+  `retry.clicksend`, whose payloads never include credentials, query strings, bodies, phone
+  numbers or message text. `Client#request` and `#paginate` take an optional `operation:` label.
+- **Message history.** `sms.history(date_from:, date_to:, to:/from:/status:/message_id:, order:)`
+  returns a page of `Clicksend::SMS::HistoryRecord`. This is the documented way to check an
+  ambiguous send.
+- **Webhooks.** `Clicksend::Webhook.parse_receipt`, `.parse_inbound` and `.parse` turn pushed
+  receipts and replies into `SMS::Receipt` and `SMS::InboundMessage`. ClickSend doesn't sign or
+  authenticate pushes, so there is deliberately no verification method; the README explains how
+  to secure the endpoint.
+- **Testing.** `require "clicksend/testing"` adds `Clicksend::Testing::FakeAPI`, an in-memory
+  ClickSend you plug in as the transport. It records sent messages and can inject failures,
+  including ambiguous ones with an explicit `processed:` flag.
+
+### Changed
+
+- **Mark-read without a cutoff is no longer retried.** `sms.mark_receipts_read` and
+  `sms.mark_inbound_read` with no `before:` mark *everything* read at the moment ClickSend
+  processes the call. Retrying after an unknown outcome could hide items that arrived in between.
+  With `before:` they are still retried.
+- **Error messages end with the request they came from**, e.g. `HTTP 500 (POST /v3/sms/send)`.
+  Code that matched the exact message text needs updating.
+- An unreadable 2xx response to a send is now marked ambiguous (it was a plain
+  `MalformedResponseError`).
+- `Client.new(max_retries:)` and `retry_policy:` are mutually exclusive. `Client#with` replaces
+  one with the other.
+
+### Documentation
+
+- README: positioning, unknown send outcomes and reconciliation, webhooks, history, background
+  jobs, instrumentation, and rate limits.
+- API notes: a review of all 34 of ClickSend's OpenAPI sections plus the archived push
+  documentation; read-only live checks of history and rate-limit headers on 2026-10-06.
+- `design/1.1-audit-and-roadmap.md`: the audit, the decisions taken, and the features rejected.
+
 ## [1.0.0] - 2026-10-05
 
 No changes to the library's behaviour or public API since 1.0.0.rc1.
@@ -72,6 +131,7 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
 - Last release of the original gem: send SMS, poll replies and delivery reports, and check
   the balance through ClickSend's v2 API.
 
+[Unreleased]: https://github.com/prayantr/clicksend/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...v1.0.0
 [1.0.0.rc1]: https://github.com/prayantr/clicksend/compare/c99edc5...v1.0.0.rc1
 [0.0.3]: https://github.com/prayantr/clicksend/tree/c99edc5
