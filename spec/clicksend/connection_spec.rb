@@ -562,3 +562,31 @@ RSpec.describe Clicksend::Connection, "mutation-testing gaps" do
     expect(@transport.calls.size).to eq(1)
   end
 end
+
+RSpec.describe Clicksend::Connection, "instrumentation invariants (mutation-tested)" do
+  let(:ok) { FakeTransport.json(200, {"http_code" => 200, "response_code" => "SUCCESS", "data" => {}}) }
+
+  def connection(*outcomes, instrumenter: Clicksend::Instrumentation::Null)
+    @transport = FakeTransport.new(*outcomes)
+    described_class.new(transport: @transport, retry_policy: Clicksend::RetryPolicy.new(max_retries: 2, base_delay: 0), instrumenter: instrumenter)
+  end
+
+  it "propagates an unexpected error raised while the request is running, rather than returning nil" do
+    allow(Kernel).to receive(:sleep).and_raise(RuntimeError, "unexpected")
+    recorder = Object.new
+    recorder.define_singleton_method(:instrument) { |_name, payload = {}, &block| block&.call(payload) }
+    expect { connection(FakeTransport.json(503, ""), ok, instrumenter: recorder).request(:get, "/v3/x", idempotent: true) }
+      .to raise_error(RuntimeError, "unexpected")
+  end
+
+  it "still returns the outcome when a subscriber freezes the payload the gem writes to" do
+    freezer = Object.new
+    freezer.define_singleton_method(:instrument) do |_name, payload = {}, &block|
+      payload.freeze
+      block.call(payload)
+    end
+    expect(connection(ok, instrumenter: freezer).request(:post, "/v3/sms/send")).to be_a(Clicksend::Response)
+    expect { connection(Clicksend::TimeoutError.new("read"), instrumenter: freezer).request(:post, "/v3/sms/send") }
+      .to raise_error(Clicksend::AmbiguousRequestError)
+  end
+end
