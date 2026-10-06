@@ -4,11 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-10-06
 
-Planned as 1.1.0. Mostly additive; read "Changed" before upgrading. Two additions are
-**experimental** and may change in a minor release: `Clicksend::Webhook` and
-`Clicksend::RateLimit`, because both rest on behaviour ClickSend doesn't document.
+Failure semantics, observability and testing support for production messaging. Mostly additive;
+read "Changed" before upgrading. Two additions are **experimental** and may change in a minor
+release: `Clicksend::Webhook` and `Clicksend::RateLimit`, because both rest on behaviour ClickSend
+doesn't document.
+
+Retry safety is unchanged in principle and stricter in practice. ClickSend has no idempotency key,
+so a send that may already have been processed is never repeated automatically, and such failures
+are now marked as ambiguous. This reduces the risk of duplicate SMS; it is not a guarantee against
+every possible duplicate (for example, a job runner re-running a job after a crash).
 
 ### Added
 
@@ -42,9 +48,9 @@ Planned as 1.1.0. Mostly additive; read "Changed" before upgrading. Two addition
 - **Message history.** `sms.history(date_from:, date_to:, to:/from:/status:/message_id:, order:)`
   returns a page of `Clicksend::SMS::HistoryRecord`, whose `delivered?`, `failed?` and `pending?`
   follow ClickSend's "SMS error codes" article and are all false when a row can't be classified
-  (e.g. "Completed" with no gateway code, as observed live). ClickSend documents no way to look up a send
-  by your own reference; history, filtered by recipient and matched on `custom_string`, is the
-  closest. The README explains why a missing row is not proof that nothing was sent.
+  (e.g. "Completed" with no gateway code, as observed live). ClickSend documents no way to look up
+  a send by your own reference; history, filtered by recipient and matched on `custom_string`, is
+  the closest. The README explains why a missing row is not proof that nothing was sent.
 - **Webhooks (experimental).** `Clicksend::Webhook.parse_receipt`, `.parse_inbound` and `.parse`
   turn pushed receipts and replies into `SMS::Receipt` and `SMS::InboundMessage`. ClickSend
   documents no way to authenticate pushes, so there is deliberately no verification method; the
@@ -88,6 +94,25 @@ Behaviour an existing 1.0 application may notice:
   - `RetryPolicy.new` validates its arguments (`ConfigurationError`) and returns a frozen policy.
   - `Client#request(idempotent:)` honours only `true`; other truthy values, such as `1` or
     `"false"`, no longer make a request retryable.
+
+### Compatibility
+
+- Ruby 3.3 or newer, as before; tested on 3.3, 3.4 and 4.0, with a Ruby head canary in CI.
+- Faraday 2 remains the only runtime dependency. ActiveSupport is used only in this gem's own
+  tests; `instrumenter:` duck-types it.
+- No public method or class from 1.0 was removed. `require "clicksend/testing"` is opt-in and
+  not loaded by `require "clicksend"`.
+
+### Verification
+
+- Unit, integration (local real-socket servers) and contract specs cover the new behaviour.
+  Contract specs check the wrapped operations, the fields the models read, and the documented
+  page-size range against ClickSend's published OpenAPI files.
+- Live checks on 2026-10-06 were read-only: `sms.history` filtered to ClickSend's test number,
+  and the rate-limit headers on `GET /v3/account`. No SMS was sent.
+- **Not verified live:** a webhook push (none has been captured), and a delivery receipt. The
+  test number produced none, as ClickSend's legacy docs say it won't. Both are parsed according
+  to ClickSend's published schemas and archived documentation.
 
 ### Documentation
 
@@ -167,7 +192,7 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
 - Last release of the original gem: send SMS, poll replies and delivery reports, and check
   the balance through ClickSend's v2 API.
 
-[Unreleased]: https://github.com/prayantr/clicksend/compare/v1.0.0...HEAD
+[1.1.0]: https://github.com/prayantr/clicksend/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...v1.0.0
 [1.0.0.rc1]: https://github.com/prayantr/clicksend/compare/c99edc5...v1.0.0.rc1
 [0.0.3]: https://github.com/prayantr/clicksend/tree/c99edc5
