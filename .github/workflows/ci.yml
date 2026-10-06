@@ -28,9 +28,10 @@ jobs:
       - run: bundle exec rspec
 
   # The OpenTelemetry companion gem, with its own Gemfile and lockfile, against the clicksend in
-  # this checkout. Its dependencies never enter the core bundle.
+  # this checkout (current core). Its dependencies never enter the core bundle. Every example
+  # must run: none may be skipped.
   companion-opentelemetry:
-    name: clicksend-opentelemetry, Ruby ${{ matrix.ruby }}
+    name: clicksend-opentelemetry / current core (this checkout), Ruby ${{ matrix.ruby }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -48,8 +49,43 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
           working-directory: companions/clicksend-opentelemetry
-      - run: bundle exec rspec
+      - run: bundle exec rspec --format progress --format json --out tmp/rspec.json
+      - run: ruby script/check_rspec_report.rb tmp/rspec.json
       - run: gem build clicksend-opentelemetry.gemspec --strict
+
+  # The same suite against the oldest clicksend the companion supports ("~> 1.1"): clicksend
+  # 1.1.0 from RubyGems, not this checkout (gemfiles/clicksend-1.1.gemfile and its lockfile).
+  # Only examples that declare a newer clicksend (clicksend: ">= 1.2") may be skipped, and the
+  # report lists them with the reason; any other failure or skip fails the job.
+  companion-opentelemetry-oldest-core:
+    name: clicksend-opentelemetry / oldest supported core (clicksend 1.1.0), Ruby ${{ matrix.ruby }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["3.3", "3.4", "4.0"]
+    env:
+      BUNDLE_GEMFILE: ${{ github.workspace }}/companions/clicksend-opentelemetry/gemfiles/clicksend-1.1.gemfile
+    defaults:
+      run:
+        working-directory: companions/clicksend-opentelemetry
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: companions/clicksend-opentelemetry
+      - name: Check that clicksend 1.1.0 comes from RubyGems
+        run: >-
+          bundle exec ruby -e 'require "clicksend"; spec = Gem.loaded_specs.fetch("clicksend");
+          abort "expected clicksend 1.1.0 from RubyGems, got #{spec.version} from #{spec.source}" unless
+          Clicksend::VERSION == "1.1.0" && spec.source.is_a?(Bundler::Source::Rubygems);
+          puts "clicksend #{Clicksend::VERSION} from #{spec.source.remotes.join(", ")}"'
+      - run: bundle exec rspec --format progress --format json --out tmp/rspec.json
+      - run: ruby script/check_rspec_report.rb tmp/rspec.json --allow-core-version-skips
 
   lint:
     runs-on: ubuntu-latest

@@ -60,6 +60,16 @@ RSpec.configure do |config|
   config.order = :random
   Kernel.srand config.seed
   config.include SpanHelpers
+  # An example that needs a newer clicksend than the oldest this gem supports
+  # declares it (clicksend: ">= 1.2", clicksend_reason: "..."). Against the
+  # clicksend in this checkout it always runs; CI's oldest-core job runs against
+  # clicksend 1.1.0 from RubyGems, where it is skipped with this message.
+  config.before do |example|
+    requirement = example.metadata[:clicksend]
+    next if requirement.nil? || Gem::Requirement.new(requirement).satisfied_by?(Gem::Version.new(Clicksend::VERSION))
+
+    skip "needs clicksend #{requirement}: #{example.metadata.fetch(:clicksend_reason)}; this run uses #{Clicksend::VERSION}"
+  end
   config.before do
     SPANS.reset
     OTEL_LOG.truncate(0)

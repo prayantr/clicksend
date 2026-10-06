@@ -1,0 +1,22 @@
+# frozen_string_literal: true
+
+# This gem against the oldest clicksend it supports (the gemspec says "~> 1.1"),
+# resolved from RubyGems rather than this checkout. Used by CI's oldest-core job:
+#
+#   BUNDLE_GEMFILE=gemfiles/clicksend-1.1.gemfile bundle exec rspec
+#
+# The development gems are the ones in ../Gemfile; keep the two lists in step.
+source "https://rubygems.org"
+
+gemspec path: ".."
+
+gem "clicksend", "1.1.0"
+
+group :development, :test do
+  gem "rake", "~> 13.0"
+  gem "rspec", "~> 3.13"
+  gem "opentelemetry-sdk", "~> 1.5"
+  gem "opentelemetry-instrumentation-faraday", "~> 0.33"
+  gem "opentelemetry-instrumentation-net_http", "~> 0.29"
+  gem "activesupport", ">= 7.1"
+end
