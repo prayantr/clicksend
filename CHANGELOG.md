@@ -61,6 +61,14 @@ Planned as 1.2.0. Additive.
 - Testing: `FakeAPI#client(max_retries:, retry_policy:)` silently ignored `max_retries:`. It now
   raises `ConfigurationError`, exactly as `Client.new` does for both, and `max_retries: nil` means
   the default, as in `Client.new`.
+- **With `adapter: :net_http_persistent`, failures before the request was written are no longer
+  ambiguous.** That adapter reports them differently from the default one, so a refused connection
+  (`Net::HTTP::Persistent::Error` "connection refused", caused by `Errno::ECONNREFUSED`), a connect
+  or TLS-handshake timeout (`Net::OpenTimeout`, wrapped in `Faraday::TimeoutError`) and a wait for a
+  pooled connection longer than connection_pool's 0.5 s (`ConnectionPool::TimeoutError`) were
+  classified as possibly sent: a send that never left was an `AmbiguousRequestError` and not
+  retried. They are now not sent, so they are retried like the default adapter's (and a pool wait is
+  a `TimeoutError`). A downed host and TLS errors still count as possibly sent with either adapter.
 
 ### Changed
 
@@ -81,6 +89,10 @@ Planned as 1.2.0. Additive.
 - Webhook replay fixtures (`spec/fixtures/webhooks`, one per published push shape, replayed
   through Rack's request parsing) and `script/webhook_capture.rb`, which captures real pushes
   locally and redacts them into fixtures. `rack` is a new development dependency.
+- `faraday-net_http_persistent` is a new development dependency:
+  `spec/integration/persistent_connection_spec.rb` runs that adapter on real sockets (plain and
+  TLS) and pins that a reused connection failing after the write never hides a retry of a POST or
+  PUT, that timeouts are honoured, and the not-sent classifications above.
 
 ## [1.1.0] - 2026-10-06
 
