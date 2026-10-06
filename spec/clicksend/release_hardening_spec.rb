@@ -66,7 +66,7 @@ RSpec.describe "1.1.0 release hardening" do
   end
 
   describe "Retry-After values that are already in the past" do
-    [["a negative number", "-5"], ["an HTTP-date in the past", "Wed, 21 Oct 2015 07:28:00 GMT"]].each do |label, value|
+    [["an HTTP-date in the past", "Wed, 21 Oct 2015 07:28:00 GMT"]].each do |label, value|
       it "treats #{label} as 0 seconds and retries a 429 at once" do
         limited = FakeTransport.json(429, "", headers: {"retry-after" => value})
         error = Clicksend::RateLimitError.new(http_status: 429, headers: {"retry-after" => value})

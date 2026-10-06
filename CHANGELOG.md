@@ -42,6 +42,52 @@ Planned as 1.2.0. Additive.
   retried. Use it to test that the job's re-run doesn't send again. ClickSend itself never does
   this.
 
+### Fixed
+
+- **Instrumenters that don't run the block synchronously can no longer send late or return nil.**
+  A `request.clicksend` block kept by the instrumenter and called after `#instrument` returned
+  now raises `ConfigurationError` without sending (before, the call raised `ConfigurationError`
+  and the SMS was sent later anyway). If `#instrument` returns while the block is still running on
+  another thread, or after swallowing an exception that escaped the request, the call raises a
+  `ConfigurationError` that is also an `AmbiguousRequestError` unless the request is idempotent
+  (before, `Client#request` could return nil while the send went ahead).
+- **`Clicksend::Client` refuses `Marshal.dump`** (`TypeError`), including inside another object
+  such as `client.sms`. A client holds the API key, which `Marshal` used to write out in clear
+  (e.g. into a cache or a job payload). Build a new client instead. Responses and errors can still
+  be marshaled.
+- **A retry delay too long to sleep no longer raises `RangeError`.** With
+  `RetryPolicy.new(max_retry_after: Float::INFINITY)`, a `Retry-After: 99999999999999999999` made
+  `Kernel.sleep` raise `RangeError` instead of the `RateLimitError`. A delay over 2**31 - 1 seconds
+  (from any policy) now means "don't retry": the request's own error is raised.
+- **Pagination never raises a non-Clicksend error for a nonsensical page.** A `current_page` below 1,
+  or a negative `last_page`, `total` or `per_page`, is a `MalformedResponseError` with the request
+  attached (before, `current_page: -1` made `next_page` raise `ArgumentError`).
+  `client.paginate(path, query: nil)` now means no query, like `Client#request`; any other
+  non-Hash `query:` raises `ArgumentError` (before, both raised `NoMethodError`).
+- **A response body that isn't valid in its declared charset is classified by its status.** A
+  body labelled e.g. `charset=us-ascii`, `shift_jis` or `utf-16le` that holds bytes invalid in that
+  charset made JSON raise an `EncodingError`, so every such response became an unreadable
+  (`MalformedResponseError`) one: a GET's 503 was not retried, and a send's 429 was reported as
+  ambiguous instead of being retried. Such a body is now treated like any other non-JSON body: an
+  error status keeps the raw body and its usual error class and retry rule; a 2xx is still a
+  `MalformedResponseError` (ambiguous for a send). Bodies labelled `utf-8` were already handled.
+- **`RateLimitError#retry_after` accepts only what RFC 9110 allows**: plain non-negative decimal
+  seconds or an HTTP-date. It used Ruby's `Integer()`, so `"0x10"` meant 16 seconds, `"1_0"` 10 and
+  `"+5"` 5; those, `"-5"` (before: 0) and non-String values are now nil, and the retry policy backs
+  off as for a missing header. It no longer raises for `nil` headers or an Array value from a
+  custom transport, so such a 429 is retried with backoff instead of being raised at once.
+- Testing: `FakeAPI#client(max_retries:, retry_policy:)` silently ignored `max_retries:`. It now
+  raises `ConfigurationError`, exactly as `Client.new` does for both, and `max_retries: nil` means
+  the default, as in `Client.new`.
+- **With `adapter: :net_http_persistent`, failures before the request was written are no longer
+  ambiguous.** That adapter reports them differently from the default one, so a refused connection
+  (`Net::HTTP::Persistent::Error` "connection refused", caused by `Errno::ECONNREFUSED`), a connect
+  or TLS-handshake timeout (`Net::OpenTimeout`, wrapped in `Faraday::TimeoutError`) and a wait for a
+  pooled connection longer than connection_pool's 0.5 s (`ConnectionPool::TimeoutError`) were
+  classified as possibly sent: a send that never left was an `AmbiguousRequestError` and not
+  retried. They are now not sent, so they are retried like the default adapter's (and a pool wait is
+  a `TimeoutError`). A downed host and TLS errors still count as possibly sent with either adapter.
+
 ### Changed
 
 - **Webhook documentation corrected from new evidence** (`Clicksend::Webhook` is still
@@ -86,6 +132,10 @@ Planned as 1.2.0. Additive.
 - Webhook replay fixtures (`spec/fixtures/webhooks`, one per published push shape, replayed
   through Rack's request parsing) and `script/webhook_capture.rb`, which captures real pushes
   locally and redacts them into fixtures. `rack` is a new development dependency.
+- `faraday-net_http_persistent` is a new development dependency:
+  `spec/integration/persistent_connection_spec.rb` runs that adapter on real sockets (plain and
+  TLS) and pins that a reused connection failing after the write never hides a retry of a POST or
+  PUT, that timeouts are honoured, and the not-sent classifications above.
 
 ## [1.1.0] - 2026-10-06
 

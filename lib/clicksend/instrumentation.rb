@@ -29,6 +29,12 @@ module Clicksend
   # without its query string; for some endpoints it includes a message ID.
   #
   # The instrumenter is called on the caller's thread and must be thread-safe.
+  # For request.clicksend it must run the block exactly once, to completion,
+  # before it returns. If it returns without running it, the call raises
+  # ConfigurationError and the block never sends, even if called later. If
+  # it returns while the block is still running (on another thread), the
+  # call raises a ConfigurationError that, for a request that is not
+  # idempotent, is also a Clicksend::AmbiguousRequestError.
   module Instrumentation
     # The default: runs the block and publishes nothing.
     module Null

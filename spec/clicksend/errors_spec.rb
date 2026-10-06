@@ -95,4 +95,28 @@ RSpec.describe "Clicksend errors" do
       expect(Clicksend::ServerError.new(http_status: 500).rate_limit).to be_nil
     end
   end
+
+  describe Clicksend::RateLimitError, "#retry_after" do
+    def retry_after(headers) = described_class.new(http_status: 429, headers: headers).retry_after
+
+    it "reads plain non-negative decimal seconds, and an HTTP-date" do
+      expect(retry_after({"retry-after" => "0"})).to eq(0)
+      expect(retry_after({"retry-after" => " 30 "})).to eq(30)
+      expect(retry_after({"retry-after" => "007"})).to eq(7)
+      expect(retry_after({"retry-after" => "99999999999999999999"})).to eq(99_999_999_999_999_999_999)
+      expect(retry_after({"retry-after" => 12})).to eq(12)
+      expect(retry_after({"retry-after" => (Time.now + 60).httpdate})).to be_within(2).of(60)
+      expect(retry_after({"retry-after" => "Wed, 21 Oct 2015 07:28:00 GMT"})).to eq(0)
+    end
+
+    it "is nil, without raising, for anything else" do
+      ["0x10", "1_0", "+5", "-5", "5.5", "1e3", "", " ", "soon", "\xFF\xFE".dup.force_encoding("UTF-8"),
+        "Wed, 21 Oct 2015 99:99:99 GMT", ["5"], {"s" => 5}, -5, 5.0, :"5", nil].each do |value|
+        expect(retry_after({"retry-after" => value})).to be_nil, value.inspect
+      end
+      [nil, [], "retry-after: 5", Object.new].each do |headers|
+        expect(retry_after(headers)).to be_nil, headers.inspect
+      end
+    end
+  end
 end

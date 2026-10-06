@@ -487,9 +487,8 @@ RSpec.describe Clicksend::Connection, "pre-release review" do
     expect(outcome).to be_a(Clicksend::Response).or(satisfy { |e| e.is_a?(Clicksend::MalformedResponseError) && e.ambiguous? })
 
     bad_headers = Clicksend::Transport::Response.new(status: 429, headers: nil, body: "")
-    # A 429 is not processed; the policy can't read Retry-After from nil headers, so retrying stops cleanly.
-    expect { connection(bad_headers).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::RateLimitError) { |e| expect(e).not_to be_ambiguous }
-    expect(@transport.calls.size).to eq(1)
+    # A 429 is not processed; with nil headers there is no Retry-After, so the policy backs off and retries.
+    expect(connection(bad_headers, FakeTransport.json(200, {})).request(:post, "/v3/sms/send").request.attempts).to eq(2)
 
     no_body = Clicksend::Transport::Response.new(status: 200, headers: {}, body: nil)
     expect { connection(no_body).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::MalformedResponseError) { |e|
@@ -588,5 +587,177 @@ RSpec.describe Clicksend::Connection, "instrumentation invariants (mutation-test
     expect(connection(ok, instrumenter: freezer).request(:post, "/v3/sms/send")).to be_a(Clicksend::Response)
     expect { connection(Clicksend::TimeoutError.new("read"), instrumenter: freezer).request(:post, "/v3/sms/send") }
       .to raise_error(Clicksend::AmbiguousRequestError)
+  end
+end
+
+# 1.2 hardening: an instrumenter that keeps the request block, runs it on
+# another thread, or swallows what it raises must never send late, send
+# twice, or make #request return nil after a send.
+RSpec.describe Clicksend::Connection, "instrumenter lifecycle" do
+  let(:ok) { FakeTransport.json(200, {"http_code" => 200, "response_code" => "SUCCESS", "data" => {}}) }
+
+  before { allow(Kernel).to receive(:sleep) }
+
+  def connection(transport, instrumenter)
+    described_class.new(transport: transport, retry_policy: Clicksend::RetryPolicy.new(max_retries: 2), instrumenter: instrumenter)
+  end
+
+  def instrumenter(&behaviour)
+    Object.new.tap { |o| o.define_singleton_method(:instrument, &behaviour) }
+  end
+
+  # A transport that signals when it is entered and answers only when released.
+  def gated_transport(response)
+    entered = Queue.new
+    release = Queue.new
+    calls = []
+    transport = Object.new
+    transport.define_singleton_method(:call) do |method, path, **|
+      calls << [method, path]
+      entered << true
+      release.pop
+      response
+    end
+    [transport, entered, release, calls]
+  end
+
+  it "never sends from a block kept and called after #instrument returned" do
+    kept = nil
+    deferring = instrumenter { |_name, payload = {}, &block| kept = [block, payload] }
+    transport = FakeTransport.new(ok)
+    expect { connection(transport, deferring).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::ConfigurationError, /must yield/) { |e|
+      expect(e).not_to be_ambiguous
+    }
+    block, payload = kept
+    expect { block.call(payload) }.to raise_error(Clicksend::ConfigurationError, /after #instrument returned/)
+    expect(transport.calls).to be_empty
+  end
+
+  it "never sends from a block that another thread runs only after #instrument returned" do
+    go = Queue.new
+    thread = nil
+    late = instrumenter do |_name, payload = {}, &block|
+      thread = Thread.new do
+        go.pop
+        block.call(payload)
+      rescue Clicksend::ConfigurationError => e
+        e
+      end
+      nil
+    end
+    transport = FakeTransport.new(ok)
+    expect { connection(transport, late).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::ConfigurationError, /must yield/)
+    go << true
+    expect(thread.value).to be_a(Clicksend::ConfigurationError)
+    expect(transport.calls).to be_empty
+  end
+
+  {post: true, get: false}.each do |method, ambiguous|
+    it "raises a ConfigurationError (ambiguous: #{ambiguous}) rather than nil when a #{method.upcase} is still running on another thread" do
+      transport, entered, release, calls = gated_transport(ok)
+      runner = nil
+      elsewhere = instrumenter do |_name, payload = {}, &block|
+        runner = Thread.new { block.call(payload) }
+        entered.pop # the request is being sent on the other thread
+        nil
+      end
+      expect { connection(transport, elsewhere).request(method, "/v3/x", idempotent: method == :get) }.to raise_error(Clicksend::ConfigurationError, /returned before the request finished/) { |e|
+        expect(e.ambiguous?).to be(ambiguous)
+        expect(e.cause).to be_nil
+      }
+      release << true
+      expect(runner.value).to be_a(Clicksend::Response)
+      expect(calls.size).to eq(1)
+    end
+  end
+
+  it "does not let an instrumenter's own exception escape while the request runs on another thread" do
+    transport, entered, release, calls = gated_transport(ok)
+    runner = nil
+    failing = instrumenter do |_name, payload = {}, &block|
+      runner = Thread.new { block.call(payload) }
+      entered.pop
+      raise IOError, "subscriber failed"
+    end
+    expect { connection(transport, failing).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::ConfigurationError) { |e|
+      expect(e).to be_ambiguous
+      expect(e.cause).to be_a(IOError)
+    }
+    release << true
+    runner.join
+    expect(calls.size).to eq(1)
+  end
+
+  it "returns the result when the block runs to completion on another thread before #instrument returns" do
+    joining = instrumenter { |_name, payload = {}, &block| Thread.new { block.call(payload) }.value }
+    transport = FakeTransport.new(ok)
+    expect(connection(transport, joining).request(:post, "/v3/sms/send")).to be_a(Clicksend::Response)
+    expect { connection(FakeTransport.new(Clicksend::TimeoutError.new("read")), joining).request(:post, "/v3/sms/send") }
+      .to raise_error(Clicksend::TimeoutError) { |e| expect(e).to be_ambiguous }
+  end
+
+  it "raises an ambiguous ConfigurationError, not nil, when the instrumenter swallows an exception that escaped a send" do
+    escaping = Class.new(Exception) # rubocop:disable Lint/InheritException
+    swallowing = instrumenter do |_name, payload = {}, &block|
+      block.call(payload)
+    rescue Exception # rubocop:disable Lint/RescueException
+      nil
+    end
+    transport = FakeTransport.new(escaping.new("from the transport"))
+    expect { connection(transport, swallowing).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::ConfigurationError) { |e|
+      expect(e).to be_ambiguous
+    }
+    expect(transport.calls.size).to eq(1)
+  end
+
+  it "never swallows an exception that is not a StandardError (e.g. Interrupt) raised after the request" do
+    interrupting = instrumenter do |_name, payload = {}, &block|
+      block.call(payload)
+      raise Interrupt
+    end
+    expect { connection(FakeTransport.new(ok), interrupting).request(:post, "/v3/sms/send") }.to raise_error(Interrupt)
+  end
+
+  it "sends once and keeps the result when the block is called twice, even from two threads" do
+    transport = FakeTransport.new(ok, ok)
+    twice = instrumenter do |_name, payload = {}, &block|
+      block.call(payload)
+      Thread.new { block.call(payload) }.join
+    end
+    expect(connection(transport, twice).request(:post, "/v3/sms/send")).to be_a(Clicksend::Response)
+    expect(transport.calls.size).to eq(1)
+  end
+end
+
+RSpec.describe Clicksend::Connection, "delays that can't be slept" do
+  def connection(*outcomes, policy:)
+    @transport = FakeTransport.new(*outcomes)
+    described_class.new(transport: @transport, retry_policy: policy)
+  end
+
+  let(:ok) { FakeTransport.json(200, {"data" => {}}) }
+
+  it "raises the 429 instead of Kernel.sleep's RangeError when an unlimited policy meets a huge Retry-After" do
+    allow(Kernel).to receive(:sleep).and_call_original
+    huge = FakeTransport.json(429, "", headers: {"retry-after" => "99999999999999999999"})
+    policy = Clicksend::RetryPolicy.new(max_retry_after: Float::INFINITY)
+    expect { connection(huge, ok, policy: policy).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::RateLimitError) { |e|
+      expect(e.request.attempts).to eq(1)
+      expect(e).not_to be_ambiguous
+    }
+    expect(Kernel).not_to have_received(:sleep)
+  end
+
+  it "gives up on a custom policy's delay beyond what Kernel.sleep accepts, and still sleeps up to that limit" do
+    allow(Kernel).to receive(:sleep)
+    policy = Struct.new(:max_retries, :answer) { def delay(**) = answer }
+    [Clicksend::Connection::MAX_SLEEP + 1, 1e20].each do |answer|
+      expect { connection(FakeTransport.json(503, ""), ok, policy: policy.new(1, answer)).request(:get, "/v3/x", idempotent: true) }
+        .to raise_error(Clicksend::ServerError)
+    end
+    expect(Kernel).not_to have_received(:sleep)
+
+    expect(connection(FakeTransport.json(503, ""), ok, policy: policy.new(1, Clicksend::Connection::MAX_SLEEP)).request(:get, "/v3/x", idempotent: true).http_status).to eq(200)
+    expect(Kernel).to have_received(:sleep).with(2_147_483_647.0)
   end
 end

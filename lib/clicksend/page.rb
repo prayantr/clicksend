@@ -30,8 +30,9 @@ module Clicksend
       if limit && !(limit.is_a?(Integer) && LIMITS.cover?(limit))
         raise ArgumentError, "limit must be an Integer between #{LIMITS.min} and #{LIMITS.max} (ClickSend's documented range)"
       end
+      raise ArgumentError, "query must be a Hash" unless query.nil? || query.is_a?(Hash)
 
-      query = query.transform_keys(&:to_s)
+      query = (query || {}).transform_keys(&:to_s)
       response = client.request(:get, path, query: query.merge("page" => page, "limit" => limit).compact, operation: operation)
       fetch_page = ->(number) { fetch(client, path, query: query, page: number, limit: limit, operation: operation, &build_item) }
       from_response(response, fetch_page, &build_item)
@@ -49,6 +50,10 @@ module Clicksend
       numbers = %w[total per_page current_page last_page].to_h do |key|
         value = Integer(data[key], exception: false) if data[key].is_a?(Integer) || data[key].is_a?(String)
         raise MalformedResponseError.new("Paginated response is missing #{key}", http_status: response.http_status, body: response.body) if value.nil?
+        # Pages are numbered from 1 (the page parameter defaults to 1); counts can be 0.
+        if value < ((key == "current_page") ? 1 : 0)
+          raise MalformedResponseError.new("Paginated response has an invalid #{key}: #{value}", http_status: response.http_status, body: response.body)
+        end
 
         [key.to_sym, value]
       end

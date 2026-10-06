@@ -53,6 +53,24 @@ RSpec.describe "Instrumentation" do
       expect(payload[:exception]).to eq(["Clicksend::ServerError", "HTTP 500 (POST /v3/sms/send)"])
     end
 
+    it "keeps a send's result, and sends once, when a subscriber raises" do
+      stub = stub_api(:post, "/v3/sms/send").to_return(json_response(fixture("sms_send")))
+      failing = ActiveSupport::Notifications.subscribe("request.clicksend") { raise IOError, "metrics down" }
+      expect(instrumented_client.sms.deliver(to: phone, body: body).status).to eq("SUCCESS")
+      expect(stub).to have_been_requested.once
+    ensure
+      ActiveSupport::Notifications.unsubscribe(failing)
+    end
+
+    it "keeps a send's ambiguous error when a subscriber raises" do
+      stub = stub_api(:post, "/v3/sms/send").to_return(status: 503, body: "")
+      failing = ActiveSupport::Notifications.subscribe("request.clicksend") { raise IOError, "metrics down" }
+      expect { instrumented_client.sms.deliver(to: phone, body: body) }.to raise_error(Clicksend::ServerError) { |e| expect(e).to be_ambiguous }
+      expect(stub).to have_been_requested.once
+    ensure
+      ActiveSupport::Notifications.unsubscribe(failing)
+    end
+
     it "records connection failures with no HTTP status" do
       stub_request(:get, "#{ApiHelpers::BASE}/v3/account").to_raise(Faraday::ConnectionFailed.new("reset"))
       expect { instrumented_client(max_retries: 0).account.fetch }.to raise_error(Clicksend::ConnectionError)
