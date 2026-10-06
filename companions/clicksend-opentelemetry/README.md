@@ -1,25 +1,23 @@
 # clicksend-opentelemetry
 
-OpenTelemetry spans for the [clicksend](../../README.md) gem, built only on its public
-`instrumenter:` hook. It depends on `opentelemetry-api`; your application chooses the SDK and
-exporter.
+OpenTelemetry spans for the [clicksend](https://github.com/prayantr/clicksend) gem, built only on
+its public `instrumenter:` hook. It depends on `opentelemetry-api`; your application chooses the
+SDK and exporter.
 
-> **0.1.0, not yet published to RubyGems.** It lives in the clicksend repository and is released
-> separately from `clicksend`, on its own version line ([CHANGELOG](CHANGELOG.md)). While it is
-> 0.x, a minor release may rename attributes as OpenTelemetry's semantic conventions change.
-> Unofficial: not affiliated with ClickSend.
+**Optional.** `clicksend` doesn't depend on this gem or on OpenTelemetry, and works the same
+without it. Add it only if you want ClickSend spans in your traces.
+
+> It lives in the clicksend repository and is released separately from `clicksend`, on its own
+> version line ([CHANGELOG](CHANGELOG.md)). While it is 0.x, a minor release may rename attributes
+> as OpenTelemetry's semantic conventions change. Unofficial: not affiliated with ClickSend.
 
 Requires Ruby 3.3 or newer, `clicksend` 1.x (1.1 or later) and `opentelemetry-api` 1.x.
 
 ## Installation
 
-Until it is on RubyGems, Bundler can take it from the repository (the gemspec is not at the
-repository's root, hence `glob:`):
-
 ```ruby
 # Gemfile
-gem "clicksend-opentelemetry", git: "https://github.com/prayantr/clicksend",
-  glob: "companions/clicksend-opentelemetry/*.gemspec"
+gem "clicksend-opentelemetry", "~> 0.1"
 ```
 
 ## Usage

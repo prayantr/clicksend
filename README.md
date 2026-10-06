@@ -896,8 +896,8 @@ send a `traceparent` header to ClickSend. With those versions:
 For ClickSend spans without that problem, use
 [`clicksend-opentelemetry`](companions/clicksend-opentelemetry): one span per call, with retries
 as events and ambiguity as an attribute, and never a query string, body or phone number. It is
-available in this repository and released separately from this gem, on its own version line; it
-is not on RubyGems yet.
+an optional, separate gem (`gem "clicksend-opentelemetry"`), released from this repository on its
+own version line; this gem never requires it.
 
 **Thread safety.** A `Clicksend::Client` is frozen after construction and holds no mutable state.
 Share one client across threads, Puma workers and Sidekiq jobs. Loggers and instrumenters are

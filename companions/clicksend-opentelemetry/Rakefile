@@ -1,0 +1,10 @@
+# frozen_string_literal: true
+
+require "bundler/gem_helper"
+
+# Release tags for this gem are clicksend-opentelemetry-vX.Y.Z, so they never
+# look like (or are accepted as) a release of clicksend itself, whose tags are
+# vX.Y.Z. Set before the tasks are defined, since they name the tag.
+helper = Bundler::GemHelper.new(__dir__, "clicksend-opentelemetry")
+helper.tag_prefix = "clicksend-opentelemetry-"
+helper.install
