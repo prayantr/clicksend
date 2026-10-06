@@ -4,9 +4,16 @@ module Clicksend
   module Testing
     # A message the FakeAPI accepted (per-message status "SUCCESS"), as
     # submitted. +to+ is nil for a message sent to a contact list
-    # (+list_id+); +schedule+ is the Unix time it was scheduled for, or nil;
-    # +sent_at+ is the (UTC) time the fake accepted it.
-    SentMessage = Data.define(:message_id, :to, :from, :body, :custom_string, :list_id, :schedule, :country, :sent_at)
+    # (+list_id+); +scheduled_at+ is the (UTC) time it was scheduled for, or
+    # nil; +sent_at+ is the (UTC) time the fake accepted it.
+    SentMessage = Data.define(:message_id, :to, :from, :body, :custom_string, :list_id, :scheduled_at, :country, :sent_at)
+
+    # Raised when test code given to the FakeAPI (a #stub block, or the
+    # +clock:+) fails. It is deliberately not a StandardError, so the client
+    # does not report it as a ClickSend failure (connection error, retry,
+    # "ambiguous" send): a typo in a stub must fail the test, not satisfy it.
+    class StubError < Exception # rubocop:disable Lint/InheritException
+    end
 
     # A request the FakeAPI received, recorded whatever its outcome.
     #

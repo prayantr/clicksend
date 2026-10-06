@@ -71,7 +71,7 @@ module Clicksend
     # this, a metrics outage after an accepted send would surface as a
     # non-Clicksend error that a job runner retries: a duplicate SMS.
     def instrumented(call)
-      payload = {method: call[:method], path: reported_path(call[:path]), operation: call[:operation], idempotent: call[:idempotent]}
+      payload = {http_method: call[:method], path: reported_path(call[:path]), operation: call[:operation], idempotent: call[:idempotent]}
       ran = false
       outcome = nil
       begin
@@ -203,7 +203,7 @@ module Clicksend
         "#{call[:method].upcase} #{reported_path(call[:path])} failed (#{error.class.name}), retrying in #{format("%.2f", delay)}s " \
           "(retry #{attempt} of #{@retry_policy.max_retries})"
       end
-      payload = {method: call[:method], path: reported_path(call[:path]), operation: call[:operation], attempt: attempt,
+      payload = {http_method: call[:method], path: reported_path(call[:path]), operation: call[:operation], attempt: attempt,
                  delay: delay, error_class: error.class.name, http_status: error_status(error)}
       @instrumenter.instrument("retry.clicksend", payload) {}
     rescue => e

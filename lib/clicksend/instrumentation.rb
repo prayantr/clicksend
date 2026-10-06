@@ -10,18 +10,18 @@ module Clicksend
   # itself and subscribe:
   #
   #   ActiveSupport::Notifications.subscribe("request.clicksend") do |event|
-  #     event.payload # => {method: :post, path: "/v3/sms/send", operation: "sms.deliver", ...}
+  #     event.payload # => {http_method: :post, path: "/v3/sms/send", operation: "sms.deliver", ...}
   #   end
   #
   # Events:
   #
   # [request.clicksend] Wraps one logical API call, retries included. The
-  #   payload has +:method+, +:path+, +:operation+ and +:idempotent+ when the
+  #   payload has +:http_method+, +:path+, +:operation+ and +:idempotent+ when the
   #   block starts; when it ends, +:attempts+, +:http_status+ (nil if no
   #   response was received), +:response_code+ and +:ambiguous+ are added. If
   #   the call raised, ActiveSupport adds +:exception+ / +:exception_object+.
   # [retry.clicksend] Published (without a block) before each retry, with
-  #   +:method+, +:path+, +:operation+, +:attempt+ (1 for the first retry),
+  #   +:http_method+, +:path+, +:operation+, +:attempt+ (1 for the first retry),
   #   +:delay+ (seconds), +:error_class+ and +:http_status+.
   #
   # Payloads never contain credentials, headers, query strings, request or

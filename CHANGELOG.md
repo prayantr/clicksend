@@ -32,15 +32,17 @@ Planned as 1.1.0. Additive, apart from the two changes under "Changed".
   `retry.clicksend`, whose payloads never include credentials, query strings, bodies, phone
   numbers or message text. `Client#request` and `#paginate` take an optional `operation:` label.
 - **Message history.** `sms.history(date_from:, date_to:, to:/from:/status:/message_id:, order:)`
-  returns a page of `Clicksend::SMS::HistoryRecord`. This is the documented way to check an
-  ambiguous send.
+  returns a page of `Clicksend::SMS::HistoryRecord`. ClickSend documents no way to look up a send
+  by your own reference; history, filtered by recipient and matched on `custom_string`, is the
+  closest. The README explains why a missing row is not proof that nothing was sent.
 - **Webhooks.** `Clicksend::Webhook.parse_receipt`, `.parse_inbound` and `.parse` turn pushed
   receipts and replies into `SMS::Receipt` and `SMS::InboundMessage`. ClickSend doesn't sign or
   authenticate pushes, so there is deliberately no verification method; the README explains how
   to secure the endpoint.
 - **Testing.** `require "clicksend/testing"` adds `Clicksend::Testing::FakeAPI`, an in-memory
   ClickSend you plug in as the transport. It records sent messages and can inject failures,
-  including ambiguous ones with an explicit `processed:` flag.
+  including ambiguous ones with an explicit `processed:` flag. Mistakes in stubs surface as
+  `Clicksend::Testing::StubError` (not a `StandardError`), never as a simulated ClickSend failure.
 
 ### Changed
 

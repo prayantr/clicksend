@@ -88,7 +88,8 @@ module Clicksend
       # gateway code (200 until there is one).
       def outbound_row(sent, accepted, receipt)
         accepted.except("status", "custom_string", "is_shared_system_number").merge(
-          "status" => "Sent", "status_code" => (receipt ? receipt["status_code"].to_s : "200"),
+          "status" => (receipt && receipt["status_code"].to_s == "301") ? "Failed" : "Completed",
+          "status_code" => receipt&.dig("status_code")&.to_s, "schedule" => accepted["schedule"].to_s,
           "status_text" => receipt&.dig("status_text"), "error_code" => receipt&.dig("error_code")&.to_s,
           "error_text" => receipt&.dig("error_text"), "custom_string" => sent.custom_string,
           "first_name" => nil, "last_name" => nil

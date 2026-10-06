@@ -25,7 +25,7 @@ RSpec.describe Clicksend::Testing::FakeAPI, "sending" do
 
       expect(fake.sent_messages).to eq([Clicksend::Testing::SentMessage.new(
         message_id: message.message_id, to: "+61411111111", from: "Acme", body: "Hi", custom_string: "otp:42",
-        list_id: nil, schedule: nil, country: "AU", sent_at: now
+        list_id: nil, scheduled_at: nil, country: "AU", sent_at: now
       )])
       expect(fake.sent_messages.first.sent_at).to be_utc
     end
@@ -45,7 +45,7 @@ RSpec.describe Clicksend::Testing::FakeAPI, "sending" do
       message = sms.deliver(to: "+61411111111", body: "Later", schedule: at)
 
       expect(message.scheduled_at).to eq(at)
-      expect(fake.sent_messages.first.schedule).to eq(at.to_i)
+      expect(fake.sent_messages.first.scheduled_at).to eq(at.utc)
     end
 
     it "prices each part with message_price (parts estimated at 160 characters)" do

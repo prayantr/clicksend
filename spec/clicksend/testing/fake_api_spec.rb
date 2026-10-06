@@ -119,11 +119,10 @@ RSpec.describe Clicksend::Testing::FakeAPI do
       expect { fake.stub(:get, "/v3/x") }.to raise_error(ArgumentError, /needs a block/)
 
       fake.stub(:get, "/v3/x") { "nope" }
-      # The connection reports anything a transport raises as a connection failure, with the cause attached.
-      expect { fake.client(max_retries: 0).request(:get, "/v3/x") }
-        .to raise_error(Clicksend::ConnectionError, /must return a Hash or a Clicksend::Transport::Response, got String/) { |e|
-          expect(e.cause).to be_a(ArgumentError)
-        }
+      # A mistake in a stub fails the test; it is never mistaken for a ClickSend failure.
+      expect { fake.client.request(:get, "/v3/x") }
+        .to raise_error(Clicksend::Testing::StubError, /must return a Hash or a Clicksend::Transport::Response, got String/)
+      expect(fake.requests.size).to eq(1) # not retried
     end
   end
 
@@ -296,5 +295,48 @@ RSpec.describe Clicksend::Testing::FakeAPI do
 
       expect(fake.client.sms.receipt(message.message_id)).to be_failed
     end
+  end
+end
+
+RSpec.describe Clicksend::Testing::FakeAPI, "mistakes in test code" do
+  require "clicksend/testing"
+
+  let(:fake) { described_class.new }
+
+  it "surfaces a raising stub as StubError, not as an ambiguous send or a retried GET" do
+    fake.stub(:post, "/v3/sms/price") { |_request| raise NoMethodError, "undefined method 'dta'" }
+    expect { fake.client.request(:post, "/v3/sms/price", body: {}) }.to raise_error(Clicksend::Testing::StubError, /NoMethodError: undefined method 'dta'/)
+
+    fake.stub(:get, "/v3/sms/templates") { |_request| raise "boom" }
+    expect { fake.client.request(:get, "/v3/sms/templates") }.to raise_error(Clicksend::Testing::StubError)
+    expect(fake.requests.count { |r| r.path == "/v3/sms/templates" }).to eq(1)
+  end
+
+  it "surfaces a failing clock as StubError, even one that calls back into the fake" do
+    reentrant = described_class.new(clock: -> { reentrant.sent_messages && Time.now })
+    expect { reentrant.client.sms.deliver(to: "+61411111111", body: "hi") }.to raise_error(Clicksend::Testing::StubError, /clock/)
+  end
+
+  it "is not a StandardError, so `rescue => e` in application code does not swallow it" do
+    expect(Clicksend::Testing::StubError.ancestors).not_to include(StandardError)
+  end
+end
+
+RSpec.describe Clicksend::Testing::FakeAPI, "recipients" do
+  require "clicksend/testing"
+
+  let(:fake) { described_class.new }
+
+  it "rejects recipients that can't be phone numbers, like ClickSend's INVALID_RECIPIENT" do
+    ["+000", "+610", "", "abc", "+61 411 111 111"].each do |to|
+      expect { fake.client.sms.deliver(to: to, body: "hi") }.to raise_error(Clicksend::MessageRejected) { |e| expect(e.status).to eq("INVALID_RECIPIENT") }
+    end
+    expect(fake.sent_messages).to be_empty
+    expect(fake.client.sms.deliver(to: "0411111111", body: "hi", country: "AU")).to be_queued # local formats are ClickSend's to judge
+  end
+
+  it "lets an explicit rule override that" do
+    fake.reject(to: "+000", status: "COUNTRY_NOT_ENABLED")
+    expect { fake.client.sms.deliver(to: "+000", body: "hi") }.to raise_error(Clicksend::MessageRejected) { |e| expect(e.status).to eq("COUNTRY_NOT_ENABLED") }
   end
 end

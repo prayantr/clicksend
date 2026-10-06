@@ -228,3 +228,25 @@ RSpec.describe Clicksend::Webhook do
     end
   end
 end
+
+RSpec.describe Clicksend::Webhook, "encodings" do
+  let(:inbound) { {"message_id" => "ABC-1", "from" => "+61411111111", "body" => "hi"} }
+
+  it "accepts binary Strings holding valid UTF-8, as Rack may provide them, and returns UTF-8" do
+    message = described_class.parse_inbound(inbound.merge("body" => "caf\xC3\xA9".b))
+    expect(message.body).to eq("café")
+    expect(message.body.encoding).to eq(Encoding::UTF_8)
+    expect(JSON.generate(message.raw)).to include("café")
+  end
+
+  it "converts other encodings to UTF-8" do
+    message = described_class.parse_inbound(inbound.merge("body" => "café".encode("UTF-16LE")))
+    expect(message.body).to eq("café")
+  end
+
+  it "rejects invalid byte sequences in values and keys as InvalidPayload, never ArgumentError" do
+    expect { described_class.parse_inbound(inbound.merge("message_id" => "\xFF\xFE".b)) }.to raise_error(Clicksend::Webhook::InvalidPayload, /UTF-8/)
+    expect { described_class.parse_inbound(inbound.merge("body" => "bad \xFF".dup.force_encoding("UTF-8"))) }.to raise_error(Clicksend::Webhook::InvalidPayload, /UTF-8/)
+    expect { described_class.parse(inbound.merge("\xFF".b => "x")) }.to raise_error(Clicksend::Webhook::InvalidPayload, /UTF-8/)
+  end
+end

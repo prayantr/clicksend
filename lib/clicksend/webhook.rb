@@ -60,8 +60,9 @@ module Clicksend
   #   end
   #
   # Because the endpoint is unauthenticated, payloads with more than
-  # MAX_FIELDS keys, a key or String value over MAX_BYTES bytes, or a value
-  # that is not a scalar (Hash, Array, uploaded file, ...) are rejected.
+  # MAX_FIELDS keys, a key or String value over MAX_BYTES bytes, a value that
+  # is not a scalar (Hash, Array, uploaded file, ...) or text that is not
+  # valid UTF-8 are rejected.
   module Webhook
     # Raised for anything that is not a usable push. The message names fields,
     # never their values (bodies and phone numbers are personal data).
@@ -130,7 +131,7 @@ module Clicksend
       params.each_with_object({}) do |(key, value), payload|
         raise InvalidPayload, "payload keys must be Strings or Symbols" unless key.is_a?(String) || key.is_a?(Symbol)
 
-        key = key.to_s
+        key = utf8!(key.to_s)
         next if RAILS_ROUTING_KEYS.include?(key)
         raise InvalidPayload, "payload has the same key as both a String and a Symbol" if payload.key?(key)
         raise InvalidPayload, "payload values must be Strings, numbers, booleans or null" unless SCALARS.any? { |type| value.is_a?(type) }
@@ -138,10 +139,22 @@ module Clicksend
           raise InvalidPayload, "payload has a key or value longer than #{MAX_BYTES} bytes"
         end
 
-        payload[key] = (value.is_a?(String) && !value.frozen?) ? value.dup.freeze : value
+        payload[key] = value.is_a?(String) ? utf8!(value) : value
       end.freeze
     end
 
-    private_class_method :receipt, :inbound, :message_id!, :normalize
+    # Rack may hand over form values as binary Strings; ClickSend sends UTF-8.
+    # Anything that is not valid UTF-8 is rejected rather than passed on to
+    # break JSON encoding or logging later.
+    def utf8!(value)
+      text = (value.encoding == Encoding::BINARY) ? value.dup.force_encoding(Encoding::UTF_8) : value.encode(Encoding::UTF_8)
+      raise InvalidPayload, "payload has a value that is not valid UTF-8" unless text.valid_encoding?
+
+      text.frozen? ? text : text.dup.freeze
+    rescue EncodingError
+      raise InvalidPayload, "payload has a value that is not valid UTF-8"
+    end
+
+    private_class_method :receipt, :inbound, :message_id!, :normalize, :utf8!
   end
 end

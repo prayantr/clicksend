@@ -45,12 +45,13 @@ RSpec.describe "Documentation examples" do
     it "the ambiguous-send rescue, against the fake" do
       fake = Clicksend::Testing::FakeAPI.new
       fake.fail_next(:timeout, processed: true)
-      user = Struct.new(:phone).new("+61411111111")
-      attempt = Struct.new(:id).new(42)
-      client = fake.client
-      text = "Your code is 481516"
+      scope = binding
+      scope.local_variable_set(:user, Struct.new(:phone).new("+61411111111"))
+      scope.local_variable_set(:attempt, Struct.new(:id).new(42))
+      scope.local_variable_set(:client, fake.client)
+      scope.local_variable_set(:text, "Your code is 481516")
       code = readme_block("rescue Clicksend::AmbiguousRequestError => e")
-      expect { binding.eval(code) }.not_to raise_error # standard:disable Security/Eval -- evaluates this repository's own README
+      expect { scope.eval(code) }.not_to raise_error # standard:disable Security/Eval -- evaluates this repository's own README
       expect(fake.sent_messages.size).to eq(1)
     end
   end

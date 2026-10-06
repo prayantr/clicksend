@@ -28,15 +28,17 @@ RSpec.describe Clicksend::Testing::FakeAPI, "history" do
     expect(records.map { |r| [r.direction, r.body, r.sent_at] }).to eq([
       ["out", "first", t(0)], ["in", "reply", t(10)], ["out", "second", t(20)]
     ])
-    expect(records[0]).to have_attributes(status: "Sent", status_code: 200, to: "+61411111111", from: "Acme",
+    expect(records[0]).to have_attributes(status: "Completed", status_code: nil, to: "+61411111111", from: "Acme",
       custom_string: "a", parts: 1, price: "0.0792", message_id: fake.sent_messages.first.message_id)
-    expect(records[0]).to be_outbound.and(be_pending)
+    expect(records[0]).to be_outbound
+    expect(records[0]).not_to be_pending # no gateway code yet, as observed live
     expect(records[1]).to have_attributes(status: "Received", from: "+61411111111", to: "Acme", custom_string: "a")
     expect(records[1]).to be_inbound
     expect(records[0].raw.keys).to include("direction", "date", "to", "body", "status", "from", "schedule", "status_code",
       "status_text", "error_code", "error_text", "message_id", "message_parts", "message_price", "list_id",
       "custom_string", "user_id", "subaccount_id", "country", "carrier")
-    expect(records[0].raw["status_code"]).to eq("200")
+    expect(records[0].raw["status_code"]).to be_nil
+    expect(records[0].raw["schedule"]).to be_a(String) # a String in ClickSend's schema and live
   end
 
   it "reports the latest receipt's gateway code on the sent message" do
@@ -44,7 +46,7 @@ RSpec.describe Clicksend::Testing::FakeAPI, "history" do
     fake.add_receipt(for: sent, status_code: 301, error_code: 3, error_text: "Expired")
 
     record = client.sms.history(message_id: sent.message_id).first
-    expect(record).to have_attributes(status: "Sent", status_code: 301, status_text: "Failed", error_code: "3", error_text: "Expired")
+    expect(record).to have_attributes(status: "Failed", status_code: 301, status_text: "Failed", error_code: "3", error_text: "Expired")
     expect(record).to be_failed
 
     fake.add_receipt(for: sent, status_code: 201)

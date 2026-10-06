@@ -16,12 +16,21 @@ module Clicksend
     # injected (#fail_next) and receipts and replies seeded (#add_receipt,
     # #add_inbound).
     #
-    # Simplifications: the balance never changes; +message_parts+ is an
-    # estimate (one per 160 characters); history status is always "Sent" for
-    # sent messages (+status_code+ follows the latest receipt) and "Received"
-    # for inbound; only accepted messages appear in history; mark-read with
-    # +date_before+ marks items whose +timestamp+ is strictly earlier
-    # (ClickSend does not document whether the cutoff is inclusive).
+    # Simplifications, so tests don't come to depend on them:
+    # - the balance never changes; +message_parts+ is an estimate (one per
+    #   160 characters);
+    # - a recipient that is not 6 to 15 digits (optionally after "+") gets
+    #   "INVALID_RECIPIENT"; the real rules are ClickSend's own;
+    # - history is immediately consistent, which ClickSend does not promise.
+    #   A sent message without a receipt shows +status+ "Completed" and a nil
+    #   +status_code+, as observed live for a test-number message; with a
+    #   receipt, +status_code+ is the receipt's and +status+ "Failed" for 301;
+    # - only accepted messages appear in history;
+    # - mark-read with +date_before+ marks items whose +timestamp+ is strictly
+    #   earlier (ClickSend does not document whether the cutoff is inclusive).
+    #
+    # Exceptions raised by #stub blocks or the +clock:+ surface as
+    # Testing::StubError, never as a simulated ClickSend failure.
     #
     # Thread-safe. Stub blocks run outside the lock, so they may call the fake.
     class FakeAPI
@@ -29,6 +38,7 @@ module Clicksend
       private_constant :Entry
 
       DECIMAL = /\A\d+(\.\d+)?\z/
+      RECIPIENT = /\A\+?\d{6,15}\z/
       HISTORY_FIELDS = %w[to from status message_id].freeze
       STATUS_TEXTS = {200 => "Sent", 201 => "Delivered", 300 => "Retrying", 301 => "Failed"}.freeze
       ROUTES = [
@@ -42,6 +52,7 @@ module Clicksend
         [:put, %r{\A/v3/sms/inbound-read/([A-Za-z0-9-]+)\z}, :mark_inbound_message_read],
         [:get, %r{\A/v3/sms/history\z}, :history]
       ].freeze
+      private_constant :DECIMAL, :RECIPIENT, :HISTORY_FIELDS, :STATUS_TEXTS, :ROUTES
 
       # @param balance [String] the account balance, as ClickSend's decimal String
       # @param currency [String] e.g. "AUD"
@@ -61,6 +72,7 @@ module Clicksend
         @outbox = [] # [SentMessage, accepted payload]
         @requests = []
         @receipts = []
+        @latest_receipts = {} # message_id => payload
         @inbound = []
         @rules = []
         @failures = [] # [Failure, remaining]
@@ -94,7 +106,7 @@ module Clicksend
       # rules, pending failures and stubs. Constructor settings are kept.
       # @return [self]
       def reset!
-        @lock.synchronize { [@outbox, @requests, @receipts, @inbound, @rules, @failures, @stubs].each(&:clear) }
+        @lock.synchronize { [@outbox, @requests, @receipts, @latest_receipts, @inbound, @rules, @failures, @stubs].each(&:clear) }
         self
       end
 
@@ -179,7 +191,7 @@ module Clicksend
         raise ArgumentError, "error_code must be an Integer or nil" unless error_code.nil? || error_code.is_a?(Integer)
         strings!(status_text: status_text, error_text: error_text, custom_string: custom_string)
 
-        received = unix(timestamp || @clock.call, "timestamp")
+        received = unix(timestamp || now, "timestamp")
         payload = {
           "timestamp_send" => timestamp_send ? unix(timestamp_send, "timestamp_send") : received, "timestamp" => received,
           "message_id" => message_id, "status_code" => status_code,
@@ -187,7 +199,10 @@ module Clicksend
           "error_code" => error_code, "error_text" => error_text, "custom_string" => custom_string,
           "subaccount_id" => Payloads::SUBACCOUNT_ID, "message_type" => "sms"
         }.freeze
-        @lock.synchronize { @receipts << Entry.new(payload, false) }
+        @lock.synchronize do
+          @receipts << Entry.new(payload, false)
+          @latest_receipts[payload["message_id"]] = payload
+        end
         SMS::Receipt.from_api(payload)
       end
 
@@ -213,7 +228,7 @@ module Clicksend
         strings!(to: to, original_message_id: original_message_id, original_body: original_body, custom_string: custom_string)
 
         payload = {
-          "timestamp" => unix(timestamp || @clock.call, "timestamp"), "from" => from, "body" => body,
+          "timestamp" => unix(timestamp || now, "timestamp"), "from" => from, "body" => body,
           "original_body" => original_body, "original_message_id" => original_message_id, "to" => to,
           "custom_string" => custom_string || "", "message_id" => SecureRandom.uuid.upcase
         }.freeze
@@ -267,9 +282,13 @@ module Clicksend
       end
 
       def stubbed(stub, request)
-        result = stub.call(request)
+        result = begin
+          stub.call(request)
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          raise StubError, "the FakeAPI stub for #{request.http_method.upcase} #{request.path} raised #{e.class}: #{e.message}"
+        end
         return result if result.is_a?(Transport::Response)
-        raise ArgumentError, "a FakeAPI stub must return a Hash or a Clicksend::Transport::Response, got #{result.class}" unless result.is_a?(Hash)
+        raise StubError, "a FakeAPI stub must return a Hash or a Clicksend::Transport::Response, got #{result.class}" unless result.is_a?(Hash)
 
         body = result.transform_keys(&:to_s)
         body = {"http_code" => 200, "response_code" => "SUCCESS", "response_msg" => "OK"}.merge(body) unless body.key?("http_code")
@@ -291,7 +310,7 @@ module Clicksend
         }
         return Payloads.error(400, "MISSING_REQUIRED_FIELDS", "Each message needs a body and either to or list_id.") unless valid
 
-        now = @clock.call
+        now = self.now
         results = messages.map { |message| submit(message, now) }
         accepted = results.select { |result| result["status"] == "SUCCESS" }
         total = accepted.sum(Rational(0)) { |result| Rational(result["message_price"]) }
@@ -307,12 +326,14 @@ module Clicksend
         id = SecureRandom.uuid.upcase
         rule = @rules.reverse_each.find { |to, _| to.nil? || to == message["to"] }
         return Payloads.rejected(message, id, rule[1]) if rule
+        return Payloads.rejected(message, id, "INVALID_RECIPIENT") if message["to"] && !message["to"].match?(RECIPIENT)
 
         payload = Payloads.accepted(message, id, now, @message_price)
         @outbox << [SentMessage.new(
           message_id: id, to: message["to"], from: message["from"], body: message["body"],
           custom_string: message["custom_string"], list_id: message["list_id"],
-          schedule: Integer(message["schedule"], exception: false), country: message["country"], sent_at: now.getutc
+          scheduled_at: Integer(message["schedule"], exception: false)&.then { |t| Time.at(t).utc },
+          country: message["country"], sent_at: now.getutc
         ), payload]
         payload
       end
@@ -384,7 +405,14 @@ module Clicksend
       end
 
       def latest_receipt(message_id)
-        @receipts.reverse_each.find { |entry| entry.payload["message_id"] == message_id }&.payload
+        @latest_receipts[message_id]
+      end
+
+      # The clock is test code: its failures are the test's, not ClickSend's.
+      def now
+        @clock.call
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        raise StubError, "the FakeAPI clock raised #{e.class}: #{e.message}"
       end
 
       def message_id!(value)

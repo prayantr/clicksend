@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
 module Clicksend
-  VERSION = "1.0.0"
+  # A development version between releases. The release pull request sets the
+  # next release number (planned: 1.1.0).
+  VERSION = "1.1.0.dev"
 end

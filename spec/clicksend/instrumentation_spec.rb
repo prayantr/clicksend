@@ -27,7 +27,7 @@ RSpec.describe "Instrumentation" do
       instrumented_client.sms.deliver(to: phone, body: body)
 
       event = events.find { |e| e.name == "request.clicksend" }
-      expect(event.payload).to eq(method: :post, path: "/v3/sms/send", operation: "sms.deliver", idempotent: false,
+      expect(event.payload).to eq(http_method: :post, path: "/v3/sms/send", operation: "sms.deliver", idempotent: false,
         attempts: 1, http_status: 200, response_code: "SUCCESS", ambiguous: false)
       expect(event.duration).to be >= 0
     end
@@ -38,7 +38,7 @@ RSpec.describe "Instrumentation" do
 
       retries = events.select { |e| e.name == "retry.clicksend" }
       expect(retries.map(&:payload)).to match([
-        hash_including(method: :get, path: "/v3/account", operation: "account.fetch", attempt: 1, error_class: "Clicksend::ServerError", http_status: 503, delay: kind_of(Numeric)),
+        hash_including(http_method: :get, path: "/v3/account", operation: "account.fetch", attempt: 1, error_class: "Clicksend::ServerError", http_status: 503, delay: kind_of(Numeric)),
         hash_including(attempt: 2)
       ])
       expect(events.find { |e| e.name == "request.clicksend" }.payload).to include(attempts: 3, http_status: 200)
@@ -84,7 +84,7 @@ RSpec.describe "Instrumentation" do
       end
       stub_api(:get, "/v3/account").to_return(json_response(fixture("account")))
       expect(client(instrumenter: yielding_nothing).account.fetch.username).to be_a(String)
-      expect(calls).to eq([["request.clicksend", {method: :get, path: "/v3/account", operation: "account.fetch", idempotent: true}]])
+      expect(calls).to eq([["request.clicksend", {http_method: :get, path: "/v3/account", operation: "account.fetch", idempotent: true}]])
     end
 
     it "is optional: the default publishes nothing" do
