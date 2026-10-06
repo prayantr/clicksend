@@ -72,6 +72,14 @@ module Clicksend
     MAX_BYTES = 10_000
     RAILS_ROUTING_KEYS = %w[controller action format].freeze
     SCALARS = [String, Integer, Float, TrueClass, FalseClass, NilClass].freeze
+    # Fields the models read; they must be scalars. Other fields that are not
+    # (e.g. the copy Rails' ParamsWrapper nests into a JSON request, or a
+    # field ClickSend may add) are left out of +raw+ instead of failing.
+    READ_FIELDS = %w[
+      message_id status_code status_text error_code error_text custom_string message_type subaccount_id
+      timestamp_send timestamp from to body original_body original_message_id
+    ].freeze
+    private_constant :RAILS_ROUTING_KEYS, :SCALARS, :READ_FIELDS
 
     module_function
 
@@ -134,7 +142,11 @@ module Clicksend
         key = utf8!(key.to_s)
         next if RAILS_ROUTING_KEYS.include?(key)
         raise InvalidPayload, "payload has the same key as both a String and a Symbol" if payload.key?(key)
-        raise InvalidPayload, "payload values must be Strings, numbers, booleans or null" unless SCALARS.any? { |type| value.is_a?(type) }
+        unless SCALARS.any? { |type| value.is_a?(type) }
+          next unless READ_FIELDS.include?(key)
+
+          raise InvalidPayload, "#{key} must be a String, number, boolean or null"
+        end
         if key.bytesize > MAX_BYTES || (value.is_a?(String) && value.bytesize > MAX_BYTES)
           raise InvalidPayload, "payload has a key or value longer than #{MAX_BYTES} bytes"
         end

@@ -1,11 +1,9 @@
 # frozen_string_literal: true
 
 RSpec.describe Clicksend::RateLimit do
-  let(:now) { Time.utc(2026, 10, 5, 12, 0, 0) }
-
   it "parses the headers observed on GET /v3/account" do
-    limit = described_class.from_headers({"x-ratelimit-limit" => "20", "x-ratelimit-remaining" => "17", "ratelimit-reset" => "42"}, now: now)
-    expect(limit).to eq(described_class.new(limit: 20, remaining: 17, reset_in: 42, reset_at: now + 42))
+    limit = described_class.from_headers({"x-ratelimit-limit" => "20", "x-ratelimit-remaining" => "17", "ratelimit-reset" => "42"})
+    expect(limit).to eq(described_class.new(limit: 20, remaining: 17, reset_in: 42))
     expect(limit).to be_frozen
   end
 
@@ -15,13 +13,19 @@ RSpec.describe Clicksend::RateLimit do
   end
 
   it "keeps the fields that are present and leaves the others nil" do
-    expect(described_class.from_headers({"x-ratelimit-remaining" => "3"}, now: now))
-      .to eq(described_class.new(limit: nil, remaining: 3, reset_in: nil, reset_at: nil))
+    expect(described_class.from_headers({"x-ratelimit-remaining" => "3"}))
+      .to eq(described_class.new(limit: nil, remaining: 3, reset_in: nil))
   end
 
   it "ignores values that are not non-negative integers" do
-    limit = described_class.from_headers({"x-ratelimit-limit" => "lots", "x-ratelimit-remaining" => "-1", "ratelimit-reset" => " 5 "}, now: now)
-    expect(limit).to eq(described_class.new(limit: nil, remaining: nil, reset_in: 5, reset_at: now + 5))
+    limit = described_class.from_headers({"x-ratelimit-limit" => "lots", "x-ratelimit-remaining" => "-1", "ratelimit-reset" => " 5 "})
+    expect(limit).to eq(described_class.new(limit: nil, remaining: nil, reset_in: 5))
+    expect(described_class.from_headers({"x-ratelimit-limit" => "1_000", "ratelimit-reset" => "+5"})).to be_nil
+  end
+
+  it "reads the same every time (nothing is computed from the clock)" do
+    response = Clicksend::Response.new(http_status: 200, headers: {"ratelimit-reset" => "60"}, body: nil)
+    expect(response.rate_limit).to eq(response.rate_limit)
   end
 
   it "is exposed on successful responses" do

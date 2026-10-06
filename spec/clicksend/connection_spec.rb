@@ -464,3 +464,81 @@ RSpec.describe Clicksend::Connection, "hardening" do
     end
   end
 end
+
+# Regressions from the hostile pre-release review.
+RSpec.describe Clicksend::Connection, "pre-release review" do
+  let(:ok) { FakeTransport.json(200, {"http_code" => 200, "response_code" => "SUCCESS", "data" => {}}) }
+
+  before { allow(Kernel).to receive(:sleep) }
+
+  def connection(*outcomes, instrumenter: Clicksend::Instrumentation::Null, policy: Clicksend::RetryPolicy.new(max_retries: 2), logger: nil)
+    @transport = FakeTransport.new(*outcomes)
+    described_class.new(transport: @transport, retry_policy: policy, instrumenter: instrumenter, logger: logger)
+  end
+
+  it "reports an unreadable 2xx send response as an ambiguous Clicksend error, never nil or a foreign error" do
+    raw = Clicksend::Transport::Response.new(status: 200, headers: {}, body: "{\"data\":{}} \xFF".dup.force_encoding("UTF-8"))
+    outcome = begin
+      connection(raw).request(:post, "/v3/sms/send")
+    rescue Clicksend::Error => e
+      e
+    end
+    # Depending on the json version the stray byte is accepted or not; either way the outcome is the gem's.
+    expect(outcome).to be_a(Clicksend::Response).or(satisfy { |e| e.is_a?(Clicksend::MalformedResponseError) && e.ambiguous? })
+
+    bad_headers = Clicksend::Transport::Response.new(status: 429, headers: nil, body: "")
+    # A 429 is not processed; the policy can't read Retry-After from nil headers, so retrying stops cleanly.
+    expect { connection(bad_headers).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::RateLimitError) { |e| expect(e).not_to be_ambiguous }
+    expect(@transport.calls.size).to eq(1)
+
+    no_body = Clicksend::Transport::Response.new(status: 200, headers: {}, body: nil)
+    expect { connection(no_body).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::MalformedResponseError) { |e|
+      expect(e).to be_ambiguous
+      expect(e.cause).to be_a(NoMethodError)
+    }
+  end
+
+  it "never lets a bug inside the request be mistaken for an instrumenter failure and swallowed" do
+    seen = []
+    recorder = Object.new
+    recorder.define_singleton_method(:instrument) do |_name, payload = {}, &block|
+      seen << payload
+      block&.call(payload)
+    end
+    no_body = Clicksend::Transport::Response.new(status: 200, headers: {}, body: nil)
+    expect { connection(no_body, instrumenter: recorder).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::MalformedResponseError)
+  end
+
+  it "sends once even if the instrumenter calls the block twice" do
+    twice = Object.new
+    twice.define_singleton_method(:instrument) do |_name, payload = {}, &block|
+      block.call(payload)
+      block.call(payload)
+    end
+    expect(connection(ok, ok, instrumenter: twice).request(:post, "/v3/sms/send")).to be_a(Clicksend::Response)
+    expect(@transport.calls.size).to eq(1)
+  end
+
+  it "classifies any other Clicksend error from a custom transport as unknown: ambiguous for a send, not retried" do
+    expect { connection(Clicksend::ServerError.new(http_status: 503), ok).request(:post, "/v3/sms/send") }
+      .to raise_error(Clicksend::ServerError) { |e|
+        expect(e).to be_ambiguous
+        expect(e.request.path).to eq("/v3/sms/send")
+      }
+    expect(@transport.calls.size).to eq(1)
+  end
+
+  it "keeps the request's own error when the retry policy raises, and stops retrying" do
+    broken = Struct.new(:max_retries) { def delay(**) = raise(NoMethodError, "bug") }.new(3)
+    expect { connection(FakeTransport.json(500, ""), ok, policy: broken).request(:get, "/v3/x", idempotent: true) }.to raise_error(Clicksend::ServerError)
+    expect(@transport.calls.size).to eq(1)
+  end
+
+  it "never copies a foreign exception's message, which may hold a URL, query string or body" do
+    leaky = IOError.new("POST https://u:KEY@rest.clicksend.com/v3/sms/send?to=+61411111111 body=code 481516")
+    expect { connection(leaky).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::ConnectionError) { |e|
+      expect(e.message).to eq("The transport failed: IOError (POST /v3/sms/send)")
+      expect(e.cause).to be(leaky)
+    }
+  end
+end

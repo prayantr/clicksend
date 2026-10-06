@@ -8,10 +8,9 @@ module Clicksend
   # observed on GET /v3/account (2026-10-05): +x-ratelimit-limit+,
   # +x-ratelimit-remaining+ and +ratelimit-reset+ (seconds until the window
   # resets). Treat every field as advisory and possibly nil; nil overall means
-  # none of the headers were present.
-  #
-  # +reset_at+ is computed when the response is read: now + +reset_in+.
-  RateLimit = Data.define(:limit, :remaining, :reset_in, :reset_at)
+  # none of the headers were present. Because the headers are undocumented,
+  # this may change if ClickSend changes them.
+  RateLimit = Data.define(:limit, :remaining, :reset_in)
 
   class RateLimit
     HEADERS = {
@@ -20,15 +19,14 @@ module Clicksend
       reset_in: "ratelimit-reset"
     }.freeze
 
+    # @api private Use Response#rate_limit or APIError#rate_limit.
     # @param headers [Hash] lower-cased response headers
     # @return [Clicksend::RateLimit, nil]
-    def self.from_headers(headers, now: Time.now)
+    def self.from_headers(headers)
       return unless headers.is_a?(Hash)
 
       values = HEADERS.transform_values { |name| non_negative_integer(headers[name]) }
-      return if values.values.all?(&:nil?)
-
-      new(**values, reset_at: values[:reset_in]&.then { |seconds| now + seconds })
+      new(**values) unless values.values.all?(&:nil?)
     end
 
     def self.non_negative_integer(value)

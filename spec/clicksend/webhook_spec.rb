@@ -166,10 +166,18 @@ RSpec.describe Clicksend::Webhook do
       end
     end
 
-    it "rejects nested and non-scalar values (ClickSend pushes are flat)" do
+    it "rejects non-scalar values in the fields it reads" do
       [{"a" => "b"}, ["x"], Object.new].each do |value|
-        invalid { described_class.parse_receipt(receipt_params.merge("extra" => value)) }
+        invalid { described_class.parse_receipt(receipt_params.merge("status_code" => value)) }
+        invalid { described_class.parse_inbound(inbound_params.merge("body" => value)) }
       end
+    end
+
+    it "leaves other non-scalar values out of raw, such as the copy Rails' ParamsWrapper nests into JSON requests" do
+      wrapped = inbound_params.merge("clicksend_webhook" => inbound_params, "media" => ["x"], "file" => Object.new)
+      message = described_class.parse_inbound(wrapped)
+      expect(message.body).to eq(inbound_params["body"])
+      expect(message.raw.keys).to match_array(inbound_params.keys)
     end
 
     it "accepts JSON scalars in fields the gem does not read" do
@@ -211,7 +219,7 @@ RSpec.describe Clicksend::Webhook do
         -> { described_class.parse_inbound(inbound_params.except("body")) },
         -> { described_class.parse_inbound(inbound_params.merge("message_id" => "../../v3/account")) },
         -> { described_class.parse_inbound(inbound_params.merge("body" => "Yes please, Thursday works" * 500)) },
-        -> { described_class.parse_inbound(inbound_params.merge("nested" => {"from" => "+447777777777"})) },
+        -> { described_class.parse_inbound(inbound_params.merge("from" => {"from" => "+447777777777"})) },
         -> { described_class.parse_inbound(inbound_params.merge(from: "+447777777777")) },
         -> { described_class.parse(inbound_params.merge("status_code" => "201")) },
         -> { described_class.parse_receipt(receipt_params.merge("status_code" => "Delivered")) },

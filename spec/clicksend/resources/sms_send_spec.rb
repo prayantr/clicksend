@@ -189,3 +189,18 @@ RSpec.describe Clicksend::Resources::SMS, "sending" do
     end
   end
 end
+
+RSpec.describe Clicksend::Resources::SMS, "send results without a readable status" do
+  def result(messages)
+    envelope({"total_count" => messages.size, "queued_count" => 0, "messages" => messages})
+  end
+
+  [nil, "", 1].each do |status|
+    it "treats a message with status #{status.inspect} as ambiguous, not rejected (it may have been queued)" do
+      message = {"message_id" => "A1", "to" => "+61411111111", "status" => status}.compact
+      stub_api(:post, "/v3/sms/send").to_return(json_response(result([message])))
+      expect { client.sms.deliver(to: "+61411111111", body: "hi") }.to raise_error(Clicksend::MalformedResponseError) { |e| expect(e).to be_ambiguous }
+      expect { client.sms.deliver_batch([{to: "+61411111111", body: "hi"}]) }.to raise_error(Clicksend::AmbiguousRequestError)
+    end
+  end
+end

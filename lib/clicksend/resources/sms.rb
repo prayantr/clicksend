@@ -224,7 +224,14 @@ module Clicksend
         body[:shorten_urls] = shorten_urls unless shorten_urls.nil?
         response = @client.request(:post, "/v3/sms/send", body: body, operation: operation)
         begin
-          [Clicksend::SMS::Batch.from_api(response.data), response.request]
+          batch = Clicksend::SMS::Batch.from_api(response.data)
+          # Without a readable per-message status there is no telling a
+          # rejection from an accepted message. Reporting it as "rejected"
+          # could lead a caller to send it again.
+          unless batch.messages.all? { |message| message.status.is_a?(String) && !message.status.empty? }
+            raise MalformedResponseError.new("A message in the send result has no status", body: batch.raw)
+          end
+          [batch, response.request]
         rescue MalformedResponseError => e
           # ClickSend answered 2xx, so the messages may well have been queued.
           raise ambiguous(e, response.request)
