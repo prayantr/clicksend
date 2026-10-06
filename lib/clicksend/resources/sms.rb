@@ -50,7 +50,11 @@ module Clicksend
         end
 
         result = batch.messages.first
-        raise MessageRejected, result if result.rejected?
+        if result.rejected?
+          rejected = MessageRejected.new(result)
+          rejected.request = request
+          raise rejected
+        end
 
         result
       end
@@ -180,8 +184,8 @@ module Clicksend
           raise ArgumentError, "pass at most one of to:, from:, status: and message_id: (ClickSend documents a single q=field:value filter)"
         end
         filters.each do |name, value|
-          unless value.is_a?(String) && !value.empty? && !value.match?(/[,[:cntrl:]]/)
-            raise ArgumentError, "#{name} must be a non-empty String without commas"
+          unless value.is_a?(String) && !value.empty? && value == value.strip && !value.match?(/[,:[:cntrl:]]/)
+            raise ArgumentError, "#{name} must be a non-empty String without commas, colons or surrounding spaces"
           end
         end
         raise ArgumentError, "order must be :asc or :desc" unless HISTORY_ORDERS.include?(order)
@@ -229,7 +233,8 @@ module Clicksend
 
       def ambiguous(error, request)
         error.request ||= request
-        error.extend(AmbiguousRequestError)
+        error.mark_ambiguous!
+        error
       end
 
       def normalize_message(message, index)

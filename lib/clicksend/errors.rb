@@ -7,13 +7,13 @@ module Clicksend
   # Response#request. Safe to log: +path+ never includes the query string, and
   # nothing here holds credentials, headers or bodies.
   #
-  # +method+ is a lower-case Symbol (:get, :post, ...); +operation+ names the
+  # +http_method+ is a lower-case Symbol (:get, :post, ...); +operation+ names the
   # wrapped method that made the call (e.g. "sms.deliver"), or is whatever was
   # passed to Client#request (nil by default); +attempts+ counts HTTP attempts,
   # so it is 1 when nothing was retried.
-  RequestInfo = Data.define(:method, :path, :operation, :idempotent, :attempts) do
+  RequestInfo = Data.define(:http_method, :path, :operation, :idempotent, :attempts) do
     def to_s
-      "#{method.to_s.upcase} #{path}"
+      "#{http_method.to_s.upcase} #{path}"
     end
 
     def inspect
@@ -47,6 +47,12 @@ module Clicksend
       is_a?(AmbiguousRequestError)
     end
 
+    # @api private Marks this error as Clicksend::AmbiguousRequestError.
+    # (A +dup+ of the error is a fresh copy without the mark; +clone+ keeps it.)
+    def mark_ambiguous!
+      extend(AmbiguousRequestError)
+    end
+
     # The message, followed by the request it came from, e.g.
     # "HTTP 500 (POST /v3/sms/send)".
     def to_s
@@ -66,12 +72,9 @@ module Clicksend
   #
   # For an SMS send it means the message may or may not have been accepted.
   # The gem never retries it; see the README on reconciling with
-  # Resources::SMS#history before sending again.
+  # Resources::SMS#history before sending again. Error#ambiguous? is the
+  # predicate.
   module AmbiguousRequestError
-    # Always true: ClickSend may have acted on the request.
-    def request_may_have_been_processed?
-      true
-    end
   end
 
   # Missing or invalid client configuration (e.g. no API key).

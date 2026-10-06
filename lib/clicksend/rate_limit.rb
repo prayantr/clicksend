@@ -32,8 +32,8 @@ module Clicksend
     end
 
     def self.non_negative_integer(value)
-      number = Integer(value.to_s.strip, 10, exception: false) if value
-      number if number && number >= 0
+      text = value.to_s.strip
+      Integer(text, 10) if text.match?(/\A\d{1,9}\z/)
     end
     private_class_method :non_negative_integer
   end

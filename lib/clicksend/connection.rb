@@ -54,9 +54,7 @@ module Clicksend
       end
 
       call = {method: method, path: path, operation: operation, idempotent: idempotent}
-      @instrumenter.instrument("request.clicksend", call.dup) do |payload|
-        run(call, query, body, headers, payload || {})
-      end
+      instrumented(call) { |payload| run(call, query, body, headers, payload) }
     end
 
     # Never show the Authorization header.
@@ -66,10 +64,44 @@ module Clicksend
 
     private
 
+    # Runs the call inside the instrumenter's request.clicksend block, but
+    # never lets the instrumenter change the outcome: once the block has run,
+    # whatever the instrumenter raises (a failing subscriber, a frozen
+    # payload, ...) is logged and the call's own result or error wins. Without
+    # this, a metrics outage after an accepted send would surface as a
+    # non-Clicksend error that a job runner retries: a duplicate SMS.
+    def instrumented(call)
+      payload = {method: call[:method], path: reported_path(call[:path]), operation: call[:operation], idempotent: call[:idempotent]}
+      ran = false
+      outcome = nil
+      begin
+        @instrumenter.instrument("request.clicksend", payload) do
+          ran = true
+          outcome = begin
+            yield payload
+          rescue Error => e
+            e
+          end
+          # Raise inside the block so ActiveSupport records the exception.
+          outcome.is_a?(Error) ? raise(outcome) : outcome
+        end
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        raise unless ran
+        raise if e.equal?(outcome) || !e.is_a?(StandardError)
+
+        log(:warn) { "instrumenter raised #{e.class.name} for #{call[:method].upcase} #{reported_path(call[:path])}; ignored" }
+      end
+      raise ConfigurationError, "the instrumenter did not run the request: #instrument must yield" unless ran
+      raise outcome if outcome.is_a?(Error)
+
+      outcome
+    end
+
     def run(call, query, body, headers, payload)
       attempt = 0
       loop do
-        info = RequestInfo.new(**call, attempts: attempt + 1)
+        info = RequestInfo.new(http_method: call[:method], path: reported_path(call[:path]), operation: call[:operation],
+          idempotent: call[:idempotent], attempts: attempt + 1)
         outcome, kind = attempt_request(call, query, body, headers)
         if outcome.is_a?(Response)
           payload.update(attempts: info.attempts, http_status: outcome.http_status, response_code: outcome.response_code, ambiguous: false)
@@ -80,7 +112,7 @@ module Clicksend
         error.request = info
         delay = retry_delay(error, kind, attempt, call[:idempotent])
         unless delay
-          error.extend(AmbiguousRequestError) if !call[:idempotent] && MAY_HAVE_BEEN_PROCESSED.include?(kind)
+          error.mark_ambiguous! if !call[:idempotent] && MAY_HAVE_BEEN_PROCESSED.include?(kind)
           payload.update(attempts: info.attempts, http_status: error_status(error), response_code: error_code(error), ambiguous: error.ambiguous?)
           raise error
         end
@@ -94,19 +126,44 @@ module Clicksend
     # One HTTP attempt. Returns a Response, or [error, kind]. Errors are
     # returned rather than raised so the retry decision can use facts about
     # this attempt without storing state on the (shared) Connection.
+    #
+    # Errors raised by the transport are copied before the connection adds
+    # context, so a frozen or reused exception instance is never modified.
+    # Anything a custom transport raises that is not a Clicksend::Error is
+    # treated as a connection failure that may have been sent.
     def attempt_request(call, query, body, headers)
       started = monotonic_now
-      raw = @transport.call(call[:method], call[:path], query: query, body: body, headers: headers)
-      log(:info) { "#{call[:method].upcase} #{call[:path]} -> #{raw.status} (#{elapsed_ms(started)}ms)" }
+      raw = begin
+        @transport.call(call[:method], call[:path], query: query, body: body, headers: headers)
+      rescue ConnectionError => e
+        return [e.dup, e.request_may_have_been_sent? ? :unknown : :not_sent]
+      rescue MalformedResponseError => e
+        return [e.dup, :undocumented]
+      rescue Error
+        raise
+      rescue => e
+        return [wrap_transport_failure(e), :unknown]
+      end
+      log(:info) { "#{call[:method].upcase} #{reported_path(call[:path])} -> #{raw.status} (#{elapsed_ms(started)}ms)" }
       interpret(raw)
-    rescue ConnectionError => e
-      [e, e.request_may_have_been_sent? ? :unknown : :not_sent]
     rescue MalformedResponseError => e
       [e, :undocumented]
     end
 
+    # Raised (and rescued) inside the caller's rescue, so #cause is the
+    # transport's original exception.
+    def wrap_transport_failure(error)
+      raise ConnectionError.new("The transport failed: #{error.class.name}", request_sent: nil)
+    rescue ConnectionError => e
+      e
+    end
+
     # @return [Response, Array(Error, Symbol)]
     def interpret(raw)
+      unless raw.respond_to?(:status) && raw.status.is_a?(Integer) && raw.status.between?(100, 599)
+        raise MalformedResponseError, "The transport returned no valid HTTP status"
+      end
+
       body = parse_body(raw)
       status = effective_status(raw.status, body)
       return Response.new(http_status: raw.status, headers: raw.headers, body: body) if success?(status)
@@ -117,29 +174,40 @@ module Clicksend
       kind = if status != raw.status then :undocumented
       elsif status == 429 then :rate_limited
       elsif status >= 500 then :unknown
-      else :rejected
+      elsif status >= 400 then :rejected
+      else :undocumented # 1xx/3xx: not expected from ClickSend (redirects are not followed)
       end
       [error, kind]
     end
 
     # The safety rule, then the policy's timing and budget.
+    #
+    # The connection also enforces the policy's own max_retries, so a policy
+    # whose #delay never says no still cannot loop forever.
     def retry_delay(error, kind, attempt, idempotent)
       eligible = RETRY_ALWAYS.include?(kind) || (kind == :unknown && idempotent)
       return unless eligible
 
+      budget = @retry_policy.max_retries
+      return unless budget.is_a?(Integer) && attempt < budget
+
       delay = @retry_policy.delay(error: error, attempt: attempt)
-      delay if delay.is_a?(Numeric) && delay.finite? && delay >= 0
+      delay = Float(delay) if delay.is_a?(Numeric)
+      delay if delay.is_a?(Float) && delay.finite? && delay >= 0
+    rescue ArgumentError, TypeError, RangeError
+      nil
     end
 
     def announce_retry(call, error, attempt, delay)
       log(:warn) do
-        "#{call[:method].upcase} #{call[:path]} failed (#{error.class.name}), retrying in #{format("%.2f", delay)}s " \
+        "#{call[:method].upcase} #{reported_path(call[:path])} failed (#{error.class.name}), retrying in #{format("%.2f", delay)}s " \
           "(retry #{attempt} of #{@retry_policy.max_retries})"
       end
-      @instrumenter.instrument(
-        "retry.clicksend",
-        call.slice(:method, :path, :operation).merge(attempt: attempt, delay: delay, error_class: error.class.name, http_status: error_status(error))
-      )
+      payload = {method: call[:method], path: reported_path(call[:path]), operation: call[:operation], attempt: attempt,
+                 delay: delay, error_class: error.class.name, http_status: error_status(error)}
+      @instrumenter.instrument("retry.clicksend", payload) {}
+    rescue => e
+      log(:warn) { "instrumenter raised #{e.class.name} for retry.clicksend; ignored" }
     end
 
     def api_error(status, raw, body)
@@ -203,8 +271,17 @@ module Clicksend
       value.is_a?(String) ? value : nil
     end
 
+    # A failing logger must not turn a completed request into an error.
     def log(level)
       @logger&.public_send(level, "[clicksend] #{yield}")
+    rescue
+      nil
+    end
+
+    # The path as reported in errors, logs and instrumentation: never with a
+    # query string or fragment, even if one was written into the path.
+    def reported_path(path)
+      path.split(/[?#]/, 2).first
     end
 
     def monotonic_now

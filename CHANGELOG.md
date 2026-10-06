@@ -17,7 +17,7 @@ Planned as 1.1.0. Additive, apart from the two changes under "Changed".
   error keeps its class, so existing `rescue` clauses still work. `Error#ambiguous?` is the
   predicate.
 - **Request context on errors and responses.** `Error#request` and `Response#request` return a
-  `Clicksend::RequestInfo` with `method`, `path` (no query string), `operation` (e.g.
+  `Clicksend::RequestInfo` with `http_method`, `path` (no query string), `operation` (e.g.
   `"sms.deliver"`), `idempotent` and `attempts`.
 - `Error#retryable?`: whether repeating the same request later is both safe and might succeed.
 - **Retry configuration.** `Clicksend::RetryPolicy` is public:
@@ -54,6 +54,26 @@ Planned as 1.1.0. Additive, apart from the two changes under "Changed".
   `MalformedResponseError`).
 - `Client.new(max_retries:)` and `retry_policy:` are mutually exclusive. `Client#with` replaces
   one with the other.
+- `Clicksend::Response` has a fourth member, `request`. Keyword and positional construction
+  with three values still works, but `#to_h`, `#deconstruct` and `==` now include it: an
+  application spec comparing `client.request(...)` with `Response.new(http_status:, headers:, body:)`
+  needs updating.
+- `MessageRejected` now carries `#request`, and its message ends with the request.
+
+### Hardening (from an adversarial review)
+
+- Nothing outside the gem can turn a processed send into a non-Clicksend error. An instrumenter
+  or logger that raises after a request completes is logged and ignored. Without this, a job
+  runner could retry a sent SMS.
+- An exception that is not a `Clicksend::Error`, raised by a custom transport, becomes a
+  `ConnectionError` that may have been sent (ambiguous for a send). Exceptions raised by
+  transports are copied before context is added, so frozen or reused instances are never
+  modified.
+- The connection enforces the policy's own `max_retries`, and ignores delays it can't use.
+- Query strings and fragments written into a path are never reported in errors, logs or
+  instrumentation.
+- A response without a valid HTTP status, or an unexpected 1xx/3xx, is ambiguous for a send
+  instead of being treated as a rejection.
 
 ### Documentation
 

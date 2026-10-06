@@ -56,7 +56,8 @@ RSpec.describe Clicksend::Resources::SMS, "sending" do
       expect { client.sms.deliver(to: "+6100", body: "hi") }.to raise_error(Clicksend::MessageRejected) { |error|
         expect(error.status).to eq("INVALID_RECIPIENT")
         expect(error.result).to be_a(Clicksend::SMS::Message)
-        expect(error.message).to eq("ClickSend rejected the message: INVALID_RECIPIENT")
+        expect(error.message).to eq("ClickSend rejected the message: INVALID_RECIPIENT (POST /v3/sms/send)")
+        expect(error.request.operation).to eq("sms.deliver")
       }
     end
 

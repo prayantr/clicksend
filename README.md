@@ -274,7 +274,8 @@ Status codes follow ClickSend's
 
 > These lists contain only **unread** items, and listing doesn't mark anything read. If you mark
 > items read while paging through them, later pages shift and you will skip some. Process the
-> pages first, then call `mark_*_read(before:)` with the time you started. Without `before:`,
+> pages first, then call `mark_*_read(before:)` with the time you started (not "now": a receipt
+> reported after you listed would also be covered by a later cutoff). Without `before:`,
 > ClickSend marks *everything* read, including items that arrived after you listed them, so that
 > form is never retried. There is no way to mark a single receipt read.
 
@@ -384,7 +385,7 @@ Clicksend::Error              #request #retryable? #ambiguous?
 Clicksend::AmbiguousRequestError (module)   extended onto any of the above when the outcome is unknown
 ```
 
-- `#request` is a `Clicksend::RequestInfo`: `method`, `path` (never the query string),
+- `#request` is a `Clicksend::RequestInfo`: `http_method`, `path` (never the query string),
   `operation` (e.g. `"sms.deliver"`), `idempotent` and `attempts`. The error message ends with
   it: `HTTP 500 (POST /v3/sms/send)`.
 - `#retryable?` is true when repeating the same request later is safe *and* might work: a 429, a

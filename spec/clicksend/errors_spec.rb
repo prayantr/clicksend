@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 RSpec.describe "Clicksend errors" do
-  def info(idempotent:, method: :post, path: "/v3/sms/send", attempts: 1)
-    Clicksend::RequestInfo.new(method: method, path: path, operation: "sms.deliver", idempotent: idempotent, attempts: attempts)
+  def info(idempotent:, path: "/v3/sms/send", attempts: 1)
+    Clicksend::RequestInfo.new(http_method: :post, path: path, operation: "sms.deliver", idempotent: idempotent, attempts: attempts)
   end
 
   def with_request(error, idempotent:)
@@ -73,7 +73,7 @@ RSpec.describe "Clicksend errors" do
         e
       end
       expect(rescued).to be_a(Clicksend::TimeoutError)
-      expect(rescued.request_may_have_been_processed?).to be(true)
+      expect(rescued.clone).to be_ambiguous
       expect(Clicksend::TimeoutError.new("x")).not_to be_ambiguous
     end
 

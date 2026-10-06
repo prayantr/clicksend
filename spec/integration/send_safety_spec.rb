@@ -46,7 +46,7 @@ RSpec.describe "SMS send safety (real HTTP stack)" do
         expect(error).to be_a(Clicksend::AmbiguousRequestError)
         expect(error).to be_ambiguous
         expect(error).not_to be_retryable
-        expect(error.request).to have_attributes(method: :post, path: "/v3/sms/send", operation: "sms.deliver", idempotent: false, attempts: 1)
+        expect(error.request).to have_attributes(http_method: :post, path: "/v3/sms/send", operation: "sms.deliver", idempotent: false, attempts: 1)
       }
       expect(@server.requests).to eq(["POST /v3/sms/send HTTP/1.1"])
     end

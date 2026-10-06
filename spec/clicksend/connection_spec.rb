@@ -266,7 +266,7 @@ RSpec.describe Clicksend::Connection, "retry safety" do
           expect { conn.request(:post, "/v3/x", idempotent: idempotent) }.to raise_error(Clicksend::Error) { |e|
             expect(e.ambiguous?).to be(ambiguous)
             expect(e.is_a?(Clicksend::AmbiguousRequestError)).to be(ambiguous)
-            expect(e.request).to have_attributes(method: :post, path: "/v3/x", idempotent: idempotent, attempts: 1)
+            expect(e.request).to have_attributes(http_method: :post, path: "/v3/x", idempotent: idempotent, attempts: 1)
           }
           expect(eager_policy.asked).to be_empty
           expect(@transport.calls.size).to eq(1)
@@ -309,7 +309,7 @@ RSpec.describe Clicksend::Connection, "request context" do
   it "attaches the request and attempt count to successful responses" do
     ok = FakeTransport.json(200, {"data" => {}})
     response = connection(FakeTransport.json(429, ""), ok).request(:get, "/v3/account", query: {secret: "x"}, idempotent: true, operation: "account.fetch")
-    expect(response.request).to eq(Clicksend::RequestInfo.new(method: :get, path: "/v3/account", operation: "account.fetch", idempotent: true, attempts: 2))
+    expect(response.request).to eq(Clicksend::RequestInfo.new(http_method: :get, path: "/v3/account", operation: "account.fetch", idempotent: true, attempts: 2))
   end
 
   it "attaches it to errors, after every attempt was made" do
@@ -319,5 +319,148 @@ RSpec.describe Clicksend::Connection, "request context" do
       expect(e.request.operation).to eq("account.fetch")
       expect(e).to be_retryable
     }
+  end
+end
+
+# Regressions from the adversarial review of the 1.1 core: nothing outside the
+# gem (instrumenters, loggers, custom transports, custom policies) may turn a
+# processed send into a non-Clicksend error, or loop.
+RSpec.describe Clicksend::Connection, "hardening" do
+  let(:ok) { FakeTransport.json(200, {"http_code" => 200, "response_code" => "SUCCESS", "data" => {}}) }
+
+  before { allow(Kernel).to receive(:sleep) }
+
+  def connection(*outcomes, instrumenter: Clicksend::Instrumentation::Null, logger: nil, policy: Clicksend::RetryPolicy.new(max_retries: 2))
+    @transport = FakeTransport.new(*outcomes)
+    described_class.new(transport: @transport, retry_policy: policy, instrumenter: instrumenter, logger: logger)
+  end
+
+  def instrumenter(&behaviour)
+    Object.new.tap { |o| o.define_singleton_method(:instrument, &behaviour) }
+  end
+
+  describe "a failing instrumenter" do
+    let(:raises_after) { instrumenter { |_name, payload = {}, &block| block&.call(payload).tap { raise "metrics backend down" } } }
+
+    it "cannot replace the result of a request that was sent" do
+      response = connection(ok, instrumenter: raises_after).request(:post, "/v3/sms/send", body: {})
+      expect(response.http_status).to eq(200)
+      expect(@transport.calls.size).to eq(1)
+    end
+
+    it "cannot replace the ambiguous error of a send" do
+      conn = connection(Clicksend::TimeoutError.new("read"), instrumenter: raises_after)
+      expect { conn.request(:post, "/v3/sms/send", body: {}) }.to raise_error(Clicksend::AmbiguousRequestError)
+    end
+
+    it "copes with an instrumenter that yields a frozen payload" do
+      frozen = instrumenter { |_name, payload = {}, &block| block.call(payload.dup.freeze) }
+      expect(connection(ok, instrumenter: frozen).request(:post, "/v3/sms/send", body: {}).http_status).to eq(200)
+    end
+
+    it "raises ConfigurationError, without sending, when the instrumenter never runs the request" do
+      lazy = instrumenter { |_name, _payload = {}| nil }
+      expect { connection(ok, instrumenter: lazy).request(:post, "/v3/sms/send", body: {}) }.to raise_error(Clicksend::ConfigurationError, /must yield/)
+      expect(@transport.calls).to be_empty
+    end
+
+    it "lets an instrumenter's failure before the request through, as nothing was sent" do
+      broken = instrumenter { |*| raise ArgumentError, "bad subscriber" }
+      expect { connection(ok, instrumenter: broken).request(:post, "/v3/sms/send", body: {}) }.to raise_error(ArgumentError, "bad subscriber")
+      expect(@transport.calls).to be_empty
+    end
+
+    it "passes a block to retry.clicksend and ignores its failures" do
+      seen = []
+      strict = instrumenter do |name, payload = {}, &block|
+        seen << [name, !block.nil?]
+        raise "retry failed" if name == "retry.clicksend"
+        block.call(payload)
+      end
+      response = connection(FakeTransport.json(429, ""), ok, instrumenter: strict).request(:get, "/v3/x")
+      expect(response.request.attempts).to eq(2)
+      expect(seen).to eq([["request.clicksend", true], ["retry.clicksend", true]])
+    end
+  end
+
+  describe "a failing logger" do
+    it "cannot turn a completed request into an error" do
+      logger = instance_double(Logger)
+      allow(logger).to receive(:info).and_raise(IOError, "disk full")
+      expect(connection(ok, logger: logger).request(:post, "/v3/sms/send", body: {}).http_status).to eq(200)
+    end
+  end
+
+  describe "a custom transport" do
+    it "turns an unexpected exception into an ambiguous ConnectionError for a send" do
+      expect { connection(Errno::ECONNRESET.new).request(:post, "/v3/sms/send", body: {}) }.to raise_error(Clicksend::ConnectionError) { |e|
+        expect(e).to be_ambiguous
+        expect(e.request_may_have_been_sent?).to be(true)
+        expect(e.cause).to be_a(Errno::ECONNRESET)
+      }
+    end
+
+    it "retries an unexpected exception only for idempotent requests" do
+      expect(connection(Errno::ECONNRESET.new, ok).request(:get, "/v3/x", idempotent: true).request.attempts).to eq(2)
+      expect { connection(Errno::ECONNRESET.new, ok).request(:post, "/v3/x") }.to raise_error(Clicksend::ConnectionError)
+    end
+
+    it "never modifies a frozen or reused exception instance" do
+      frozen = Clicksend::TimeoutError.new("read").freeze
+      expect { connection(frozen).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::TimeoutError) { |e| expect(e).to be_ambiguous }
+      expect(frozen).not_to be_ambiguous
+
+      shared = Clicksend::ConnectionError.new("reset")
+      expect { connection(shared).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::ConnectionError)
+      expect(shared).not_to be_ambiguous
+      expect(shared.request).to be_nil
+    end
+
+    it "treats a response without a valid status as malformed, and ambiguous for a send" do
+      [0, nil, 600, "200"].each do |status|
+        raw = Clicksend::Transport::Response.new(status: status, headers: {}, body: "")
+        expect { connection(raw).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::MalformedResponseError) { |e| expect(e).to be_ambiguous }
+      end
+    end
+
+    it "treats an unexpected 3xx on a send as ambiguous, not as a rejection" do
+      expect { connection(FakeTransport.json(302, "")).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::APIError) { |e| expect(e).to be_ambiguous }
+    end
+  end
+
+  describe "a custom retry policy" do
+    it "cannot exceed its own max_retries" do
+      always = Struct.new(:max_retries) { def delay(**) = 0 }.new(3)
+      limited = Array.new(10) { FakeTransport.json(429, "") }
+      expect { connection(*limited, policy: always).request(:post, "/v3/sms/send") }.to raise_error(Clicksend::RateLimitError)
+      expect(@transport.calls.size).to eq(4)
+    end
+
+    it "is ignored when its answers are unusable" do
+      [Complex(1, 1), 10**400, "1", Object.new].each do |answer|
+        policy = Struct.new(:max_retries, :answer) { def delay(**) = answer }.new(2, answer)
+        expect { connection(FakeTransport.json(429, ""), ok, policy: policy).request(:get, "/v3/x") }.to raise_error(Clicksend::RateLimitError)
+      end
+      bad_budget = Struct.new(:max_retries) { def delay(**) = 0 }.new("2")
+      expect { connection(FakeTransport.json(429, ""), ok, policy: bad_budget).request(:get, "/v3/x") }.to raise_error(Clicksend::RateLimitError)
+    end
+  end
+
+  describe "query strings written into the path" do
+    it "are never reported in errors, logs or instrumentation" do
+      events = []
+      recorder = instrumenter do |name, payload = {}, &block|
+        events << [name, payload]
+        block&.call(payload)
+      end
+      log = StringIO.new
+      conn = connection(FakeTransport.json(500, ""), instrumenter: recorder, logger: Logger.new(log))
+      expect { conn.request(:post, "/v3/sms/history?q=to:+61411111111#frag") }.to raise_error(Clicksend::ServerError) { |e|
+        expect(e.message).to eq("HTTP 500 (POST /v3/sms/history)")
+        expect(e.request.path).to eq("/v3/sms/history")
+      }
+      expect(events.inspect + log.string).not_to include("61411111111")
+      expect(@transport.calls.first.path).to eq("/v3/sms/history?q=to:+61411111111#frag") # still sent as given
+    end
   end
 end
