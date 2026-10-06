@@ -148,7 +148,11 @@ module Clicksend
     #   page = client.paginate("/v3/sms/history", query: {date_from: from.to_i}, limit: 100)
     #   page.auto_paging_each { |message| ... }
     #
+    # @param query [Hash, nil] query parameters, kept for every page
+    # @param page [Integer, nil] the page to fetch (from 1)
+    # @param limit [Integer, nil] items per page, 15 to 100
     # @return [Clicksend::Page]
+    # @raise [ArgumentError] for an invalid query, page or limit
     def paginate(path, query: {}, page: nil, limit: nil, operation: nil)
       Page.fetch(self, path, query: query, page: page, limit: limit, operation: operation)
     end

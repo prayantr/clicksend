@@ -41,6 +41,11 @@ Planned as 1.2.0. Additive.
   `RetryPolicy.new(max_retry_after: Float::INFINITY)`, a `Retry-After: 99999999999999999999` made
   `Kernel.sleep` raise `RangeError` instead of the `RateLimitError`. A delay over 2**31 - 1 seconds
   (from any policy) now means "don't retry": the request's own error is raised.
+- **Pagination never raises a non-Clicksend error for a nonsensical page.** A `current_page` below 1,
+  or a negative `last_page`, `total` or `per_page`, is a `MalformedResponseError` with the request
+  attached (before, `current_page: -1` made `next_page` raise `ArgumentError`).
+  `client.paginate(path, query: nil)` now means no query, like `Client#request`; any other
+  non-Hash `query:` raises `ArgumentError` (before, both raised `NoMethodError`).
 
 ### Changed
 
