@@ -1,0 +1,39 @@
+# Publishes the clicksend-opentelemetry companion gem (companions/) to RubyGems
+# with Trusted Publishing (OIDC, no stored API key), exactly as release.yml does
+# for clicksend. Manual only, and gated by the "rubygems-clicksend-opentelemetry"
+# environment, which accepts runs from clicksend-opentelemetry-v* tags only.
+# The trusted publisher on rubygems.org names this repository, this workflow
+# file and that environment.
+#
+# Release process (see companions/clicksend-opentelemetry/CHANGELOG.md): merge
+# the version bump into master, push an annotated
+# clicksend-opentelemetry-vX.Y.Z tag on that commit, then run this workflow from
+# the tag. The companion's Rakefile uses that tag prefix, so `rake release`
+# finds the existing tag, skips tagging and only builds and pushes the gem. This
+# workflow never creates or pushes tags.
+name: Release clicksend-opentelemetry
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: rubygems-clicksend-opentelemetry
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+          working-directory: companions/clicksend-opentelemetry
+      - run: bundle exec rspec
+        working-directory: companions/clicksend-opentelemetry
+      - uses: rubygems/release-gem@v1
+        with:
+          working-directory: companions/clicksend-opentelemetry

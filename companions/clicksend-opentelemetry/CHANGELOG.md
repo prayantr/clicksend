@@ -1,14 +1,16 @@
 # Changelog
 
 All notable changes to `clicksend-opentelemetry` are documented here. It is versioned and released
-separately from [`clicksend`](../../CHANGELOG.md). The format follows
+separately from [`clicksend`](https://github.com/prayantr/clicksend/blob/master/CHANGELOG.md). The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the version is 0.x, a minor
 release may rename span attributes as OpenTelemetry's semantic conventions change.
 
 ## [Unreleased]
 
-Planned as 0.1.0, the first release. Not yet published to RubyGems.
+## [0.1.0] - 2026-10-06
+
+The first release.
 
 ### Added
 
@@ -16,8 +18,9 @@ Planned as 0.1.0, the first release. Not yet published to RubyGems.
   span of kind CLIENT per ClickSend API call, retries included, named `clicksend <operation>`
   (`clicksend <METHOD>` when there is no operation). Attributes: `http.request.method`,
   `server.address`, `server.port`, `url.path` (never the query string; `record_path: false` leaves
-  it out, and the path out of the exception event's message), `http.response.status_code`, `error.type`, and `clicksend.operation`,
-  `clicksend.idempotent`, `clicksend.attempts`, `clicksend.ambiguous`, `clicksend.response_code`.
+  it out, and the path out of the exception event's message), `http.response.status_code`,
+  `error.type`, and `clicksend.operation`, `clicksend.idempotent`, `clicksend.attempts`,
+  `clicksend.ambiguous`, `clicksend.response_code`.
   Each retry is a `clicksend.retry` span event. A failed call sets the span status to ERROR and
   adds an `exception` event whose message is built only from the class, HTTP status, ClickSend's
   `response_code` and the request line, never from the exception's own message.
@@ -29,3 +32,6 @@ Planned as 0.1.0, the first release. Not yet published to RubyGems.
   ones, pass through unchanged.
 - Requires Ruby 3.3 or newer, `clicksend` 1.x (from 1.1) and `opentelemetry-api` 1.x. The SDK and
   exporters are the application's choice.
+
+[Unreleased]: https://github.com/prayantr/clicksend/compare/clicksend-opentelemetry-v0.1.0...HEAD
+[0.1.0]: https://github.com/prayantr/clicksend/releases/tag/clicksend-opentelemetry-v0.1.0
