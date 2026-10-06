@@ -153,12 +153,40 @@ the contract specs only, **not** against a live receipt.
 | `GET /v3/sms/history?q=to:%2B61411111111&date_from=…&order_by=date:asc&limit=100` (`sms.history(to:, date_from:)`) | HTTP 200, paginated envelope. Exactly one row, the accepted test-number message from 2026-10-05, so `q=to:` filters and the encoded `+` works. Row: `direction: "out"`, `status: "Completed"`, `status_code: null`, `status_text: null`, `message_parts: 0`, `message_price: "0.0000"`, `custom_string` a String, `date` an Integer, `schedule` a String. The documented fields, plus `contact_id`, `user_id`, `subaccount_id`, `first_name`, `last_name`, `_api_username` |
 | `GET /v3/account` rate-limit headers through `Response#rate_limit` | `limit: 20`, `remaining` and `reset_in` Integers |
 
+### `sms.cancel` check (2026-10-06, protocol B3.7)
+
+Run through the gem (`client.sms.cancel`, `max_retries: 0`) with one scheduled message to the free
+test number `+61411111111` (`schedule:` one hour ahead) and nothing else sent. Every call was
+answered quickly (under 1.1s); the balance was the same before the send, after it, and at the end.
+
+| Step | Live result |
+|---|---|
+| Scheduled send to the test number | HTTP 200, per-message `status: "SUCCESS"`, `message_price: "0.0000"`, `message_parts: 0`, `schedule` one hour ahead |
+| History (`q=message_id:`) at 0s, 5s, 30s, 120s | No row at 0s. From 5s on, one row with status **`Completed`** (not `Scheduled`), `status_code: null` |
+| `PUT /v3/sms/{id}/cancel` on that message, no body | HTTP **404** `{"http_code":404,"response_code":"NOT_FOUND","response_msg":"Record not found.","data":null}`. The gem raised `Clicksend::NotFoundError`, not ambiguous |
+| History after the cancel (0s to 120s) | Still `Completed` |
+| The same cancel again | Same HTTP 404 `NOT_FOUND` envelope |
+| A random well-formed UUID | Same HTTP 404 `NOT_FOUND` envelope |
+| The 2026-10-05 accepted test-number message (`Completed`) | Same HTTP 404 `NOT_FOUND` envelope; history unchanged |
+
+What this shows:
+- A scheduled message to the free test number is **not held**: it is `Completed` within seconds,
+  so the test number can't exercise a successful cancel. The documented `200 SUCCESS` answer is
+  still unobserved live.
+- Cancelling a message that is no longer scheduled answers 404 `NOT_FOUND`, **not** `SUCCESS`, at
+  least for test-number messages. An unknown ID gets the same answer, so a 404 doesn't say which.
+- The path, the bodiless `PUT`, the JSON error envelope and the gem's mapping (typed, not
+  ambiguous, not retried) match the implementation.
+
 ### Still unverified
 
 These need a receipt for a real (non-test) message, existing inbound messages, or the public
 test accounts:
 
 - [ ] A live receipt: its shape and `status_code` type. The free test number produced none.
+- [ ] A successful `sms.cancel` (HTTP 200) and how a cancelled message shows in history. A
+      scheduled message to the free test number completes at once, so this needs a message that
+      ClickSend actually holds, i.e. a paid, scheduled send that is then cancelled.
 - [ ] Inbound timestamp field (`timestamp` or `timestamp_send`); no inbound messages existed
 - [ ] HTTP status and `response_code` for the `nocredit`, `notactive` and `banned` test accounts
 - [ ] Whether mark-read accepts an empty `{}` body. Deliberately not tested, because it would
