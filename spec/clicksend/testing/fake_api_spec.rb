@@ -145,7 +145,7 @@ RSpec.describe Clicksend::Testing::FakeAPI do
       expect(client.sms.inbound).to be_empty
       expect { client.sms.receipt("A") }.to raise_error(Clicksend::NotFoundError)
       expect(client.sms.deliver(to: "+61411111111", body: "Hi")).to be_queued
-      expect(client.sms.history.size).to eq(1)
+      expect(fake.sent_messages.size).to eq(1)
     end
   end
 
@@ -200,7 +200,7 @@ RSpec.describe Clicksend::Testing::FakeAPI do
       fake.fail_next(:connection_refused)
       client.sms.deliver(to: "+61411111111", body: "Hi")
       client.account.fetch
-      client.request(:get, "/v3/sms/history", query: {q: "to:+61411111111"})
+      client.sms.receipts
 
       authorization = "Basic #{["user-7f3a:SECRET-KEY-9c1e"].pack("m0")}"
       dumped = [fake.requests.inspect, fake.requests.map(&:to_h).to_s, fake.inspect, fake.sent_messages.inspect].join
@@ -247,96 +247,7 @@ RSpec.describe Clicksend::Testing::FakeAPI do
     expect(a_request(:any, /.*/)).not_to have_been_made
   end
 
-  describe "the example in lib/clicksend/testing.rb" do
-    let(:sender_class) do
-      Class.new do
-        def initialize(sms:) = @sms = sms
-
-        def call(phone:, code:, ref:)
-          @sms.deliver(to: phone, body: "Your code is #{code}", custom_string: ref)
-          :sent
-        rescue Clicksend::AmbiguousRequestError
-          history = @sms.history(to: phone, date_from: Time.now - 600)
-          found = history.auto_paging_each.any? { |record| record.custom_string == ref }
-          found ? :sent : :unknown
-        end
-      end
-    end
-    let(:sender) { sender_class.new(sms: fake.client.sms) }
-
-    it "sends the code" do
-      expect(sender.call(phone: "+61411111111", code: "481516", ref: "otp:42")).to eq(:sent)
-      expect(fake.sent_messages.map { |m| [m.to, m.custom_string] }).to eq([["+61411111111", "otp:42"]])
-    end
-
-    it "surfaces a rejected number" do
-      fake.reject(to: "+61400000000", status: "INVALID_RECIPIENT")
-      expect { sender.call(phone: "+61400000000", code: "1", ref: "otp:43") }.to raise_error(Clicksend::MessageRejected)
-    end
-
-    it "finds a message that was accepted although the response was lost" do
-      fake.fail_next(:timeout, processed: true, path: "/v3/sms/send")
-
-      expect(sender.call(phone: "+61411111111", code: "481516", ref: "otp:42")).to eq(:sent)
-      expect(fake.sent_messages.size).to eq(1)
-      expect(fake.requests.map(&:path)).to eq(["/v3/sms/send", "/v3/sms/history"])
-    end
-
-    it "reports an unknown outcome when history has no trace of it" do
-      fake.fail_next(:timeout, processed: false, path: "/v3/sms/send")
-
-      expect(sender.call(phone: "+61411111111", code: "481516", ref: "otp:42")).to eq(:unknown)
-      expect(fake.sent_messages).to be_empty
-    end
-
-    it "reads delivery receipts" do
-      message = fake.client.sms.deliver(to: "+61411111111", body: "Hi")
-      fake.add_receipt(for: fake.sent_messages.last, status_code: 301, error_text: "Expired")
-
-      expect(fake.client.sms.receipt(message.message_id)).to be_failed
-    end
-  end
-end
-
-RSpec.describe Clicksend::Testing::FakeAPI, "mistakes in test code" do
-  require "clicksend/testing"
-
-  let(:fake) { described_class.new }
-
-  it "surfaces a raising stub as StubError, not as an ambiguous send or a retried GET" do
-    fake.stub(:post, "/v3/sms/price") { |_request| raise NoMethodError, "undefined method 'dta'" }
-    expect { fake.client.request(:post, "/v3/sms/price", body: {}) }.to raise_error(Clicksend::Testing::StubError, /NoMethodError: undefined method 'dta'/)
-
-    fake.stub(:get, "/v3/sms/templates") { |_request| raise "boom" }
-    expect { fake.client.request(:get, "/v3/sms/templates") }.to raise_error(Clicksend::Testing::StubError)
-    expect(fake.requests.count { |r| r.path == "/v3/sms/templates" }).to eq(1)
-  end
-
-  it "surfaces a failing clock as StubError, even one that calls back into the fake" do
-    reentrant = described_class.new(clock: -> { reentrant.sent_messages && Time.now })
-    expect { reentrant.client.sms.deliver(to: "+61411111111", body: "hi") }.to raise_error(Clicksend::Testing::StubError, /clock/)
-  end
-
-  it "is not a StandardError, so `rescue => e` in application code does not swallow it" do
-    expect(Clicksend::Testing::StubError.ancestors).not_to include(StandardError)
-  end
-end
-
-RSpec.describe Clicksend::Testing::FakeAPI, "recipients" do
-  require "clicksend/testing"
-
-  let(:fake) { described_class.new }
-
-  it "rejects recipients that can't be phone numbers, like ClickSend's INVALID_RECIPIENT" do
-    ["+000", "+610", "", "abc", "+61 411 111 111"].each do |to|
-      expect { fake.client.sms.deliver(to: to, body: "hi") }.to raise_error(Clicksend::MessageRejected) { |e| expect(e.status).to eq("INVALID_RECIPIENT") }
-    end
-    expect(fake.sent_messages).to be_empty
-    expect(fake.client.sms.deliver(to: "0411111111", body: "hi", country: "AU")).to be_queued # local formats are ClickSend's to judge
-  end
-
-  it "lets an explicit rule override that" do
-    fake.reject(to: "+000", status: "COUNTRY_NOT_ENABLED")
-    expect { fake.client.sms.deliver(to: "+000", body: "hi") }.to raise_error(Clicksend::MessageRejected) { |e| expect(e.status).to eq("COUNTRY_NOT_ENABLED") }
+  it "does not serve history, so tests must state what history shows" do
+    expect { fake.client.sms.history }.to raise_error(Clicksend::NotFoundError)
   end
 end

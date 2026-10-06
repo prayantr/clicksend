@@ -9,10 +9,15 @@ module Clicksend
     #   client.sms.deliver(to: "+61411111111", body: "Hi", custom_string: "otp:42")
     #   fake.sent_messages.last.custom_string # => "otp:42"
     #
-    # It emulates the endpoints this gem wraps, with ClickSend's response
-    # shapes: POST /v3/sms/send, GET /v3/account, receipts and inbound (list,
-    # one receipt, mark read) and GET /v3/sms/history. Anything else answers
-    # 404 unless #stub-bed. Recipients can be rejected (#reject), failures
+    # It emulates these endpoints, with ClickSend's response shapes:
+    # POST /v3/sms/send, GET /v3/account, and receipts and inbound (list, one
+    # receipt, mark read). Anything else answers 404 unless #stub-bed.
+    #
+    # It deliberately does not serve GET /v3/sms/history. ClickSend doesn't
+    # say how soon a sent message appears there, and an always-up-to-date fake
+    # history would let a "not in history, so resend" rule pass its tests and
+    # then send twice in production. To test reconciliation code, #stub the
+    # history rows your scenario needs, including none. Recipients can be rejected (#reject), failures
     # injected (#fail_next) and receipts and replies seeded (#add_receipt,
     # #add_inbound).
     #
@@ -21,11 +26,6 @@ module Clicksend
     #   160 characters);
     # - a recipient that is not 6 to 15 digits (optionally after "+") gets
     #   "INVALID_RECIPIENT"; the real rules are ClickSend's own;
-    # - history is immediately consistent, which ClickSend does not promise.
-    #   A sent message without a receipt shows +status+ "Completed" and a nil
-    #   +status_code+, as observed live for a test-number message; with a
-    #   receipt, +status_code+ is the receipt's and +status+ "Failed" for 301;
-    # - only accepted messages appear in history;
     # - mark-read with +date_before+ marks items whose +timestamp+ is strictly
     #   earlier (ClickSend does not document whether the cutoff is inclusive).
     #
@@ -39,7 +39,6 @@ module Clicksend
 
       DECIMAL = /\A\d+(\.\d+)?\z/
       RECIPIENT = /\A\+?\d{6,15}\z/
-      HISTORY_FIELDS = %w[to from status message_id].freeze
       STATUS_TEXTS = {200 => "Sent", 201 => "Delivered", 300 => "Retrying", 301 => "Failed"}.freeze
       ROUTES = [
         [:post, %r{\A/v3/sms/send\z}, :send_sms],
@@ -49,10 +48,9 @@ module Clicksend
         [:put, %r{\A/v3/sms/receipts-read\z}, :mark_receipts_read],
         [:get, %r{\A/v3/sms/inbound\z}, :list_inbound],
         [:put, %r{\A/v3/sms/inbound-read\z}, :mark_inbound_read],
-        [:put, %r{\A/v3/sms/inbound-read/([A-Za-z0-9-]+)\z}, :mark_inbound_message_read],
-        [:get, %r{\A/v3/sms/history\z}, :history]
+        [:put, %r{\A/v3/sms/inbound-read/([A-Za-z0-9-]+)\z}, :mark_inbound_message_read]
       ].freeze
-      private_constant :DECIMAL, :RECIPIENT, :HISTORY_FIELDS, :STATUS_TEXTS, :ROUTES
+      private_constant :DECIMAL, :RECIPIENT, :STATUS_TEXTS, :ROUTES
 
       # @param balance [String] the account balance, as ClickSend's decimal String
       # @param currency [String] e.g. "AUD"
@@ -382,26 +380,6 @@ module Clicksend
 
         entries.each { |entry| entry.read = true if cutoff.nil? || entry.payload["timestamp"] < cutoff }
         Payloads.ok(message, nil)
-      end
-
-      def history(request)
-        query = request.query
-        date_from = Integer(query["date_from"], 10, exception: false) if query["date_from"]
-        date_to = Integer(query["date_to"], 10, exception: false) if query["date_to"]
-        field, value = query["q"]&.split(":", 2)
-        if field && !(HISTORY_FIELDS.include?(field) && value)
-          return Payloads.error(400, "BAD_REQUEST", "q must be field:value with field one of #{HISTORY_FIELDS.join(", ")}.")
-        end
-
-        rows = @outbox.map { |sent, payload| Payloads.outbound_row(sent, payload, latest_receipt(sent.message_id)) } +
-          @inbound.map { |entry| Payloads.inbound_row(entry.payload) }
-        rows = rows.each_with_index.select do |row, _|
-          (date_from.nil? || row["date"] >= date_from) && (date_to.nil? || row["date"] <= date_to) &&
-            (field.nil? || row[field].to_s == value)
-        end
-        rows = rows.sort_by { |row, index| [row["date"], index] }.map(&:first)
-        rows.reverse! if query["order_by"] == "date:desc"
-        Payloads.page(rows, request.path, query, "Here are your data.")
       end
 
       def latest_receipt(message_id)

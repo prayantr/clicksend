@@ -83,28 +83,6 @@ module Clicksend
       def currency(name)
         {"currency_name_short" => name}
       end
-
-      # A history row for a sent message: "Sent", with the latest receipt's
-      # gateway code (200 until there is one).
-      def outbound_row(sent, accepted, receipt)
-        accepted.except("status", "custom_string", "is_shared_system_number").merge(
-          "status" => (receipt && receipt["status_code"].to_s == "301") ? "Failed" : "Completed",
-          "status_code" => receipt&.dig("status_code")&.to_s, "schedule" => accepted["schedule"].to_s,
-          "status_text" => receipt&.dig("status_text"), "error_code" => receipt&.dig("error_code")&.to_s,
-          "error_text" => receipt&.dig("error_text"), "custom_string" => sent.custom_string,
-          "first_name" => nil, "last_name" => nil
-        )
-      end
-
-      def inbound_row(inbound)
-        {
-          "direction" => "in", "date" => inbound["timestamp"], "to" => inbound["to"], "body" => inbound["body"],
-          "from" => inbound["from"], "status" => "Received", "status_code" => nil, "status_text" => nil,
-          "error_code" => nil, "error_text" => nil, "message_id" => inbound["message_id"],
-          "message_parts" => parts(inbound["body"]), "custom_string" => inbound["custom_string"],
-          "user_id" => USER_ID, "subaccount_id" => SUBACCOUNT_ID
-        }
-      end
     end
   end
 end

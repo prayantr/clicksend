@@ -258,3 +258,11 @@ RSpec.describe Clicksend::Webhook, "encodings" do
     expect { described_class.parse(inbound.merge("\xFF".b => "x")) }.to raise_error(Clicksend::Webhook::InvalidPayload, /UTF-8/)
   end
 end
+
+RSpec.describe Clicksend::Webhook, "unconvertible encodings" do
+  it "reports a value that cannot be converted to UTF-8 as InvalidPayload" do
+    unconvertible = "\xA4".dup.force_encoding("EUC-JP") # an incomplete EUC-JP sequence: Encoding::InvalidByteSequenceError on encode
+    payload = {"message_id" => "ABC-1", "from" => "+61411111111", "body" => unconvertible}
+    expect { described_class.parse_inbound(payload) }.to raise_error(Clicksend::Webhook::InvalidPayload, /UTF-8/)
+  end
+end

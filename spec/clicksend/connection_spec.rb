@@ -542,3 +542,23 @@ RSpec.describe Clicksend::Connection, "pre-release review" do
     }
   end
 end
+
+RSpec.describe Clicksend::Connection, "mutation-testing gaps" do
+  def connection(*outcomes)
+    @transport = FakeTransport.new(*outcomes)
+    described_class.new(transport: @transport, retry_policy: Clicksend::RetryPolicy.new(max_retries: 2, base_delay: 0))
+  end
+
+  before { allow(Kernel).to receive(:sleep) }
+
+  it "strips a fragment even without a query string" do
+    expect { connection(FakeTransport.json(500, "")).request(:post, "/v3/contacts/1#token-123") }
+      .to raise_error(Clicksend::ServerError, "HTTP 500 (POST /v3/contacts/1)")
+  end
+
+  it "treats a MalformedResponseError raised by a custom transport as unknown: ambiguous for a send, never retried" do
+    expect { connection(Clicksend::MalformedResponseError.new("garbled"), FakeTransport.json(200, {})).request(:post, "/v3/sms/send") }
+      .to raise_error(Clicksend::MalformedResponseError) { |e| expect(e).to be_ambiguous }
+    expect(@transport.calls.size).to eq(1)
+  end
+end
