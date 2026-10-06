@@ -1,0 +1,14 @@
+{
+  "timestamp_send": "1759730400",
+  "timestamp": "1759730412",
+  "message_id": "4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B",
+  "status": "Delivered",
+  "status_code": "201",
+  "status_text": "Success: Message received on handset.",
+  "error_code": "",
+  "error_text": "",
+  "custom_string": "order-1042",
+  "user_id": "100001",
+  "subaccount_id": "100002",
+  "message_type": "sms"
+}
