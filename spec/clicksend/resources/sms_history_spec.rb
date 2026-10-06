@@ -85,3 +85,49 @@ RSpec.describe Clicksend::Resources::SMS, "#history" do
     expect { Clicksend::SMS::HistoryRecord.from_api(nil) }.to raise_error(Clicksend::MalformedResponseError)
   end
 end
+
+RSpec.describe Clicksend::SMS::HistoryRecord, "delivery predicates" do
+  def record(status, status_code)
+    described_class.from_api("message_id" => "A", "direction" => "out", "status" => status, "status_code" => status_code)
+  end
+
+  def predicates(status, status_code)
+    r = record(status, status_code)
+    [r.delivered?, r.failed?, r.pending?]
+  end
+
+  # Rows of ClickSend's "SMS error codes" article (help 42318), with the code as a
+  # String (as the history schema documents) and as an Integer.
+  {
+    ["Sent", "200"] => [false, false, true],
+    ["Sent", "201"] => [true, false, false],
+    ["Queued", "200"] => [false, false, true],
+    ["Scheduled", "200"] => [false, false, true],
+    ["WaitApproval", "200"] => [false, false, true],
+    ["Cancelled", "301"] => [false, true, false],
+    ["Failed", "301"] => [false, true, false],
+    ["CancelledAfterReview", nil] => [false, true, false],
+    ["Sent", 201] => [true, false, false],
+    ["Failed", 301] => [false, true, false]
+  }.each do |(status, code), expected|
+    it "reads #{status.inspect} with code #{code.inspect} as delivered/failed/pending #{expected}" do
+      expect(predicates(status, code)).to eq(expected)
+    end
+  end
+
+  it "uses the documented statuses when the code is missing" do
+    expect(predicates("Queued", nil)).to eq([false, false, true])
+    expect(predicates("Failed", nil)).to eq([false, true, false])
+  end
+
+  it "claims nothing for a row it can't classify, such as the live 'Completed' row with no code" do
+    expect(predicates("Completed", nil)).to eq([false, false, false])
+    expect(predicates("Sent", nil)).to eq([false, false, false]) # 200 or 201: unknown without a code
+    expect(predicates("Received", nil)).to eq([false, false, false])
+  end
+
+  it "lets the code decide when status and code disagree" do
+    expect(predicates("Completed", "201")).to eq([true, false, false])
+    expect(predicates("Completed", "300")).to eq([false, false, true])
+  end
+end

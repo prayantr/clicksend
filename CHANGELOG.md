@@ -40,7 +40,9 @@ Planned as 1.1.0. Mostly additive; read "Changed" before upgrading. Two addition
   wrapped methods' paths contain no phone numbers or message text. `Client#request` and
   `#paginate` take an optional `operation:` label.
 - **Message history.** `sms.history(date_from:, date_to:, to:/from:/status:/message_id:, order:)`
-  returns a page of `Clicksend::SMS::HistoryRecord`. ClickSend documents no way to look up a send
+  returns a page of `Clicksend::SMS::HistoryRecord`, whose `delivered?`, `failed?` and `pending?`
+  follow ClickSend's "SMS error codes" article and are all false when a row can't be classified
+  (e.g. "Completed" with no gateway code, as observed live). ClickSend documents no way to look up a send
   by your own reference; history, filtered by recipient and matched on `custom_string`, is the
   closest. The README explains why a missing row is not proof that nothing was sent.
 - **Webhooks (experimental).** `Clicksend::Webhook.parse_receipt`, `.parse_inbound` and `.parse`

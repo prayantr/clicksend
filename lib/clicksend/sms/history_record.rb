@@ -10,6 +10,21 @@ module Clicksend
     # "Received"), which is not the send-time status of SMS::Message.
     # +status_code+ is the gateway code also used by receipts (see
     # SMS::Receipt): 200 not final, 201 delivered, 300 retrying, 301 failed.
+    # It can be nil: a test-number message was observed as "Completed" with no
+    # code.
+    #
+    # The predicates follow ClickSend's "SMS error codes" article (help 42318).
+    # The gateway code decides when present. Without one, only statuses whose
+    # code that article fixes are used: "Queued", "Scheduled" and
+    # "WaitApproval" are always 200 (pending); "Failed" and "Cancelled" are
+    # 301 and "CancelledAfterReview" never reached the network (failed). A
+    # "Sent" row can be 200 or 201, and "Completed" isn't in the article, so
+    # without a code neither is known: all three predicates are false.
+    # History statuses whose gateway code help 42318 fixes (see HistoryRecord).
+    HISTORY_PENDING_STATUSES = %w[Queued Scheduled WaitApproval].freeze
+    HISTORY_FAILED_STATUSES = %w[Failed Cancelled CancelledAfterReview].freeze
+    private_constant :HISTORY_PENDING_STATUSES, :HISTORY_FAILED_STATUSES
+
     HistoryRecord = Data.define(
       :message_id, :direction, :status, :status_code, :status_text, :error_code, :error_text,
       :to, :from, :body, :parts, :price, :custom_string, :list_id, :country, :carrier,
@@ -51,17 +66,19 @@ module Clicksend
         direction == "in"
       end
 
+      # Delivered to the handset (gateway code 201).
       def delivered?
         status_code == 201
       end
 
+      # Final and not delivered: code 301, or a failed or cancelled status.
       def failed?
-        status_code == 301
+        status_code.nil? ? HISTORY_FAILED_STATUSES.include?(status) : status_code == 301
       end
 
-      # Not final yet: sent/queued/scheduled (200) or temporarily failing (300).
+      # Not final yet: code 200 or 300, or a status that is always 200.
       def pending?
-        status_code == 200 || status_code == 300
+        status_code.nil? ? HISTORY_PENDING_STATUSES.include?(status) : [200, 300].include?(status_code)
       end
     end
   end
