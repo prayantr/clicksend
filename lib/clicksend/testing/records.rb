@@ -10,9 +10,9 @@ module Clicksend
 
     # A request the FakeAPI received, recorded whatever its outcome.
     #
-    # +method+ is a lower-case Symbol; +query+ has String keys and values, as
+    # +http_method+ is a lower-case Symbol; +query+ has String keys and values, as
     # ClickSend would receive them; +body+ is the parsed JSON (deep-frozen), or
     # nil. Headers are never recorded: they carry the credentials.
-    Request = Data.define(:method, :path, :query, :body)
+    Request = Data.define(:http_method, :path, :query, :body)
   end
 end

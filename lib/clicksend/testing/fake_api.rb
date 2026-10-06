@@ -229,7 +229,7 @@ module Clicksend
         request = build_request(method, path, query, body)
         failure, stub = @lock.synchronize do
           @requests << request
-          [take_failure(request), @stubs[[request.method, request.path]]]
+          [take_failure(request), @stubs[[request.http_method, request.path]]]
         end
         return failure.trigger if failure && !failure.processed?
 
@@ -253,7 +253,7 @@ module Clicksend
         rescue JSON::ParserError
           body.dup.freeze
         end
-        Request.new(method: method.to_s.downcase.to_sym, path: path.freeze, query: params.to_h { |k, v| [k.freeze, v.freeze] }.freeze, body: parsed)
+        Request.new(http_method: method.to_s.downcase.to_sym, path: path.freeze, query: params.to_h { |k, v| [k.freeze, v.freeze] }.freeze, body: parsed)
       end
 
       def take_failure(request)
@@ -278,7 +278,7 @@ module Clicksend
 
       def route(request)
         ROUTES.each do |verb, pattern, handler|
-          match = pattern.match(request.path) if verb == request.method
+          match = pattern.match(request.path) if verb == request.http_method
           return __send__(handler, request, *match.captures) if match
         end
         Payloads.error(404)

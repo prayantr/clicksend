@@ -35,7 +35,7 @@ RSpec.describe Clicksend::Testing::FakeAPI, "sending" do
 
       expect(fake.requests.size).to eq(1)
       request = fake.requests.first
-      expect(request).to have_attributes(method: :post, path: "/v3/sms/send", query: {})
+      expect(request).to have_attributes(http_method: :post, path: "/v3/sms/send", query: {})
       expect(request.body).to eq({"messages" => [{"to" => "+61411111111", "body" => "Hi"}]})
       expect(request.body).to be_frozen
     end

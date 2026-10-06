@@ -62,7 +62,7 @@ module Clicksend
       end
 
       def matches?(request)
-        (@path.nil? || @path == request.path) && (@method.nil? || @method == request.method)
+        (@path.nil? || @path == request.path) && (@method.nil? || @method == request.http_method)
       end
 
       # Raises the connection error, or returns the error response.

@@ -113,14 +113,14 @@ RSpec.describe Clicksend::Testing::FakeAPI, "receipts and inbound" do
       expect(client.sms.mark_receipts_read(before: 200)).to be_nil
 
       expect(client.sms.receipts.map(&:message_id)).to eq(%w[EDGE NEW])
-      expect(fake.requests.find { |r| r.method == :put }.body).to eq({"date_before" => 200})
+      expect(fake.requests.find { |r| r.http_method == :put }.body).to eq({"date_before" => 200})
     end
 
     it "marks every unread receipt without a cutoff" do
       client.sms.mark_receipts_read
 
       expect(client.sms.receipts).to be_empty
-      expect(fake.requests.find { |r| r.method == :put }.body).to eq({})
+      expect(fake.requests.find { |r| r.http_method == :put }.body).to eq({})
     end
 
     it "lists receipts added after marking" do

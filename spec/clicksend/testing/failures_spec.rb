@@ -11,7 +11,7 @@ RSpec.describe Clicksend::Testing::FakeAPI, "#fail_next" do
   end
 
   def paths
-    fake.requests.map { |request| "#{request.method.upcase} #{request.path}" }
+    fake.requests.map { |request| "#{request.http_method.upcase} #{request.path}" }
   end
 
   describe "failures before the request was sent (retried for every method)" do

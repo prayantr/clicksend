@@ -73,7 +73,7 @@ RSpec.describe Clicksend::Testing::FakeAPI do
       response = fake.client.request(:get, "/v3/sms/templates", query: {page: 1})
 
       expect(response.body).to eq("http_code" => 200, "response_code" => "SUCCESS", "response_msg" => "OK", "data" => {"data" => [{"template_id" => 1}]})
-      expect(seen).to eq(Clicksend::Testing::Request.new(method: :get, path: "/v3/sms/templates", query: {"page" => "1"}, body: nil))
+      expect(seen).to eq(Clicksend::Testing::Request.new(http_method: :get, path: "/v3/sms/templates", query: {"page" => "1"}, body: nil))
     end
 
     it "uses a Hash's own http_code as the status" do
@@ -119,7 +119,11 @@ RSpec.describe Clicksend::Testing::FakeAPI do
       expect { fake.stub(:get, "/v3/x") }.to raise_error(ArgumentError, /needs a block/)
 
       fake.stub(:get, "/v3/x") { "nope" }
-      expect { fake.client.request(:get, "/v3/x") }.to raise_error(ArgumentError, /must return a Hash or a Clicksend::Transport::Response, got String/)
+      # The connection reports anything a transport raises as a connection failure, with the cause attached.
+      expect { fake.client(max_retries: 0).request(:get, "/v3/x") }
+        .to raise_error(Clicksend::ConnectionError, /must return a Hash or a Clicksend::Transport::Response, got String/) { |e|
+          expect(e.cause).to be_a(ArgumentError)
+        }
     end
   end
 
@@ -205,7 +209,7 @@ RSpec.describe Clicksend::Testing::FakeAPI do
       expect(dumped).not_to include(authorization)
       expect(dumped).not_to include("Authorization")
       expect(fake.instance_variables.map { |name| fake.instance_variable_get(name) }.inspect).not_to include("SECRET-KEY-9c1e")
-      expect(Clicksend::Testing::Request.members).to eq(%i[method path query body])
+      expect(Clicksend::Testing::Request.members).to eq(%i[http_method path query body])
     end
 
     it "keeps inspect short" do
@@ -220,7 +224,7 @@ RSpec.describe Clicksend::Testing::FakeAPI do
       fake.call(:GET, "/v3/sms/history?q=to%3A%2B61411111111", query: {"limit" => 20}, body: nil, headers: {})
       response = fake.call(:post, "/v3/sms/send", query: nil, body: "not json", headers: {})
 
-      expect(fake.requests.first).to have_attributes(method: :get, path: "/v3/sms/history",
+      expect(fake.requests.first).to have_attributes(http_method: :get, path: "/v3/sms/history",
         query: {"q" => "to:+61411111111", "limit" => "20"})
       expect(fake.requests.last.body).to eq("not json")
       expect(response.status).to eq(400)

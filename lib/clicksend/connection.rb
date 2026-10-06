@@ -153,7 +153,7 @@ module Clicksend
     # Raised (and rescued) inside the caller's rescue, so #cause is the
     # transport's original exception.
     def wrap_transport_failure(error)
-      raise ConnectionError.new("The transport failed: #{error.class.name}", request_sent: nil)
+      raise ConnectionError.new("The transport failed: #{error.class.name}: #{error.message.to_s[0, 200]}", request_sent: nil)
     rescue ConnectionError => e
       e
     end
