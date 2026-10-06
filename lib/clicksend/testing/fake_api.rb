@@ -156,10 +156,20 @@ module Clicksend
       #   fake.fail_next(status: 500, processed: false)
       #   fake.fail_next(status: 429, retry_after: 0)      # never processed
       #   fake.fail_next(status: 401)                      # any 4xx; never processed
+      #   fake.fail_next(:interrupted, processed: true)    # the worker is stopped mid-send
       #
       # +processed:+ is required exactly when the outcome is ambiguous (a read
-      # timeout, a reset or a 5xx): with +true+ the request is handled first (a
-      # send is recorded), then the failure is returned; with +false+ it is not.
+      # timeout, a reset, a 5xx or an interruption): with +true+ the request is
+      # handled first (a send is recorded), then the failure is returned; with
+      # +false+ it is not.
+      #
+      # +:interrupted+ is not a ClickSend failure. It models your job runner
+      # stopping the worker during the call (Sidekiq's shutdown raising
+      # Sidekiq::Shutdown into busy threads, for example) by raising
+      # SimulatedInterrupt, which is not a StandardError: the client lets it
+      # through untouched and never retries it. Use it to test what the next
+      # run of the job does, e.g. that an in-flight marker stops it sending
+      # again.
       #
       # @param path [String, nil] only requests to this exact path
       # @param method [Symbol, nil] only requests with this HTTP method
@@ -284,6 +294,7 @@ module Clicksend
       # ignored and never stored: they hold the credentials.
       # @return [Clicksend::Transport::Response]
       # @raise [Clicksend::ConnectionError] for injected connection failures
+      # @raise [SimulatedInterrupt] for fail_next(:interrupted)
       def call(method, path, query: nil, body: nil, headers: nil)
         request = build_request(method, path, query, body)
         failure, stub = @lock.synchronize do

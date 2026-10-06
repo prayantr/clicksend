@@ -13,3 +13,4 @@ gem "bundler-audit", require: false
 gem "json_schemer", "~> 2.4", require: false # contract tests against ClickSend's OpenAPI files
 gem "activesupport", ">= 7.1", require: false # proves instrumenter: ActiveSupport::Notifications works as documented
 gem "rack", ">= 3.0", require: false # replays webhook fixtures through Rack's own form/query parsing (spec/support/webhook_replay.rb)
+gem "minitest", ">= 5.20", require: false # runs the opt-in Minitest assertions (lib/clicksend/testing/minitest.rb) inside real Minitest::Test cases; only activesupport pulled it in before

@@ -23,6 +23,24 @@ Planned as 1.2.0. Additive.
   (`fake.cancelled_messages`) and raises `StubError` for every cancel ClickSend doesn't document,
   so tests must stub that answer. `fake.stub_history(*messages, status: "Sent")` states what
   history shows; the fake still serves no history by itself.
+- Testing: opt-in RSpec matchers, `require "clicksend/testing/rspec"`:
+  `expect(fake).to have_sent_sms(to:, body:, custom_string:, ...)` (any `SentMessage` attribute,
+  matched with `===`) with `.once`, `.twice`, `.times(n)` and `.exactly(n).times`;
+  `not_to have_sent_sms(...)`; and `have_sent_no_sms`. Without a count exactly one message must
+  match, so a duplicate fails, and the negated form means "none matching". Failures list what was
+  sent, one line per message (at most ten, long values shortened). The require includes the
+  matchers in every example group (`Clicksend::Testing::RSpecMatchers`).
+- Testing: opt-in Minitest assertions, `require "clicksend/testing/minitest"` and
+  `include Clicksend::Testing::MinitestAssertions`: `assert_sms_sent(fake, count: 1, **attributes)`
+  (returns the matching messages) and `assert_no_sms_sent(fake, **attributes)`, with the same
+  matching and failure output. Neither framework is a dependency or loaded by
+  `require "clicksend"` or `require "clicksend/testing"`.
+- Testing: `fake.fail_next(:interrupted, processed: true|false)` simulates the job runner stopping
+  the worker mid-send (Sidekiq's shutdown, a deploy's SIGTERM), after or before ClickSend processed
+  the request. It raises `Clicksend::Testing::SimulatedInterrupt`, an `Exception` that is neither
+  a `StandardError` nor an `Interrupt`, so it passes through the client untouched and is never
+  retried. Use it to test that the job's re-run doesn't send again. ClickSend itself never does
+  this.
 
 ### Changed
 

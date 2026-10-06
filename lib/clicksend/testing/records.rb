@@ -19,6 +19,20 @@ module Clicksend
     class StubError < Exception # rubocop:disable Lint/InheritException
     end
 
+    # Raised by FakeAPI#fail_next(:interrupted, processed: ...): the job
+    # runner stopping the worker in the middle of a send, before or after
+    # ClickSend processed it. It models your job runner (Sidekiq's shutdown
+    # raising Sidekiq::Shutdown into busy threads, a deploy's SIGTERM, a
+    # timeout), not anything ClickSend does.
+    #
+    # Like those, it is not a StandardError, so the client lets it through
+    # untouched: it is never retried, never wrapped in a Clicksend::Error and
+    # never reported as ambiguous. It is not an ::Interrupt either, so a test
+    # that doesn't rescue it fails like any other example instead of
+    # stopping the test run.
+    class SimulatedInterrupt < Exception # rubocop:disable Lint/InheritException
+    end
+
     # A request the FakeAPI received, recorded whatever its outcome.
     #
     # +http_method+ is a lower-case Symbol; +query+ has String keys and values, as
