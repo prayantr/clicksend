@@ -258,6 +258,8 @@ module Clicksend
       return unless budget.is_a?(Integer) && attempt < budget
 
       delay = @retry_policy.delay(error: error, attempt: attempt)
+      return if (delay.is_a?(Integer) || delay.is_a?(Rational)) && delay > MAX_SLEEP # Float() would warn
+
       delay = Float(delay) if delay.is_a?(Numeric)
       delay if delay.is_a?(Float) && delay.between?(0, MAX_SLEEP)
     rescue *FOREIGN_FAILURES => e

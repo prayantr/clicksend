@@ -437,9 +437,13 @@ RSpec.describe Clicksend::Connection, "hardening" do
     end
 
     it "is ignored when its answers are unusable" do
-      [Complex(1, 1), 10**400, "1", Object.new].each do |answer|
+      [Complex(1, 1), 10**400, Rational(10**400, 3), "1", Object.new].each do |answer|
         policy = Struct.new(:max_retries, :answer) { def delay(**) = answer }.new(2, answer)
-        expect { connection(FakeTransport.json(429, ""), ok, policy: policy).request(:get, "/v3/x") }.to raise_error(Clicksend::RateLimitError)
+        verbose, $VERBOSE = $VERBOSE, true
+        expect { connection(FakeTransport.json(429, ""), ok, policy: policy).request(:get, "/v3/x") }
+          .to raise_error(Clicksend::RateLimitError).and output("").to_stderr
+      ensure
+        $VERBOSE = verbose
       end
       bad_budget = Struct.new(:max_retries) { def delay(**) = 0 }.new("2")
       expect { connection(FakeTransport.json(429, ""), ok, policy: bad_budget).request(:get, "/v3/x") }.to raise_error(Clicksend::RateLimitError)
