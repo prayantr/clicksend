@@ -58,6 +58,9 @@ Planned as 1.2.0. Additive.
   `"+5"` 5; those, `"-5"` (before: 0) and non-String values are now nil, and the retry policy backs
   off as for a missing header. It no longer raises for `nil` headers or an Array value from a
   custom transport, so such a 429 is retried with backoff instead of being raised at once.
+- Testing: `FakeAPI#client(max_retries:, retry_policy:)` silently ignored `max_retries:`. It now
+  raises `ConfigurationError`, exactly as `Client.new` does for both, and `max_retries: nil` means
+  the default, as in `Client.new`.
 
 ### Changed
 

@@ -96,11 +96,15 @@ module Clicksend
       # A real Clicksend::Client using this fake, with the production retry
       # rules but no backoff delay. A 429's Retry-After is still honoured
       # (injected 429s default to 0 seconds).
-      # @param overrides [Hash] any Client.new option
+      # @param overrides [Hash] any Client.new option. As with Client.new,
+      #   +max_retries:+ and +retry_policy:+ together raise ConfigurationError.
       # @return [Clicksend::Client]
       def client(**overrides)
-        retries = overrides.key?(:max_retries) ? {max_retries: overrides.delete(:max_retries)} : {}
-        defaults = {username: "test", api_key: "test", transport: self, retry_policy: RetryPolicy.new(**retries, base_delay: 0, max_delay: 0)}
+        defaults = {username: "test", api_key: "test", transport: self}
+        unless overrides.key?(:retry_policy)
+          retries = {max_retries: overrides.delete(:max_retries)}.compact
+          defaults[:retry_policy] = RetryPolicy.new(**retries, base_delay: 0, max_delay: 0)
+        end
         Client.new(**defaults.merge(overrides))
       end
 
