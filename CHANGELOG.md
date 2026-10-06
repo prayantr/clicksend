@@ -46,6 +46,13 @@ Planned as 1.2.0. Additive.
   attached (before, `current_page: -1` made `next_page` raise `ArgumentError`).
   `client.paginate(path, query: nil)` now means no query, like `Client#request`; any other
   non-Hash `query:` raises `ArgumentError` (before, both raised `NoMethodError`).
+- **A response body that isn't valid in its declared charset is classified by its status.** A
+  body labelled e.g. `charset=us-ascii`, `shift_jis` or `utf-16le` that holds bytes invalid in that
+  charset made JSON raise an `EncodingError`, so every such response became an unreadable
+  (`MalformedResponseError`) one: a GET's 503 was not retried, and a send's 429 was reported as
+  ambiguous instead of being retried. Such a body is now treated like any other non-JSON body: an
+  error status keeps the raw body and its usual error class and retry rule; a 2xx is still a
+  `MalformedResponseError` (ambiguous for a send). Bodies labelled `utf-8` were already handled.
 
 ### Changed
 

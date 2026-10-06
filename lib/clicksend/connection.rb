@@ -200,8 +200,8 @@ module Clicksend
       rescue MalformedResponseError => e
         [e, :undocumented]
       rescue => e
-        # A response this gem cannot even read (e.g. a body that is not valid
-        # in its declared charset) is undocumented: ambiguous for a send.
+        # A response this gem cannot even read (e.g. a custom transport's
+        # body that is not a String) is undocumented: ambiguous for a send.
         [wrap_failure(MalformedResponseError, "Could not read ClickSend's response", e), :undocumented]
       end
     end
@@ -289,11 +289,15 @@ module Clicksend
 
     # Returns the parsed JSON, nil for an empty body, or the raw String when an
     # error response isn't JSON (e.g. an HTML page from a proxy).
+    #
+    # A body that isn't valid in its declared charset (JSON converts it to
+    # UTF-8 first) is unreadable in the same way, so the status still decides:
+    # a garbled 429 or 503 must stay retryable, and a 400 a rejection.
     def parse_body(raw)
       return nil if raw.body.b.strip.empty?
 
       JSON.parse(raw.body, freeze: true)
-    rescue JSON::ParserError
+    rescue JSON::ParserError, EncodingError
       return raw.body unless success?(raw.status)
 
       raise MalformedResponseError.new(

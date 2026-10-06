@@ -99,6 +99,37 @@ RSpec.describe "Send safety on the wire" do
     end
   end
 
+  describe "a body that is not valid in its declared charset" do
+    def raw(status, charset, body) = "HTTP/1.1 #{status} X\r\nContent-Type: text/html; charset=#{charset}\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}"
+
+    %w[utf-8 us-ascii shift_jis utf-16le].each do |charset|
+      it "is classified by its status, keeping the raw body: a #{charset} GET 503 is retried" do
+        serve(reply(raw(503, charset, "<h1>\xFF\xFE\xC3</h1>")), reply(ok('{"data":{}}')))
+        expect(wire_client.request(:get, "/v3/account").request.attempts).to eq(2)
+      end
+
+      it "is classified by its status: a #{charset} 429 on a send is retried, never ambiguous" do
+        serve(reply(raw(429, charset, "\xFF\xFE\xC3 slow down")), reply(ok))
+        expect(deliver.status).to eq("SUCCESS")
+        expect(@server.arrivals.size).to eq(2)
+      end
+
+      it "is classified by its status: a #{charset} 400 on a send is a rejection with the raw body" do
+        serve(reply(raw(400, charset, "\xFF\xFE\xC3 bad")))
+        expect { deliver }.to raise_error(Clicksend::BadRequestError) { |e|
+          expect(e).not_to be_ambiguous
+          expect(e.body.b).to eq("\xFF\xFE\xC3 bad".b)
+        }
+      end
+
+      it "is an ambiguous MalformedResponseError for a #{charset} 2xx answer to a send" do
+        serve(reply(raw(200, charset, "{\"data\":\xFF\xFE\xC3")))
+        expect { deliver }.to raise_error(Clicksend::MalformedResponseError) { |e| expect(e).to be_ambiguous }
+        expect(@server.arrivals.size).to eq(1)
+      end
+    end
+  end
+
   it "accepts a valid gzip-encoded send result" do
     gzipped = Zlib.gzip(WIRE_SEND_OK)
     serve(reply("HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: #{gzipped.bytesize}\r\nConnection: close\r\n\r\n#{gzipped}"))
