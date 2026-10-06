@@ -18,16 +18,19 @@ module Clicksend
   # +status+ ("Delivered"/"Undelivered"); those stay in +raw+.
   #
   # ClickSend documents no signing or authentication for pushes: no HMAC,
-  # signature, secret or published IP ranges. Treat anyone who knows the URL
-  # as able to forge one, so:
+  # signature or secret, and no current list of source IP addresses (archived
+  # help pages once listed some; they can't be checked today, so don't
+  # allowlist by IP). Treat anyone who knows the URL as able to forge one, so:
   # - put an unguessable secret in the URL path and compare it in constant time
   #   (it will appear in access logs: restrict who reads them);
   # - use HTTPS;
   # - treat the event as a hint; a receipt can probably be confirmed with
   #   <tt>client.sms.receipt(event.message_id)</tt> (not yet verified for
   #   accounts with only URL rules);
-  # - process idempotently by +message_id+: several matching rules may each push,
-  #   and (per the archived docs) a non-200 is retried every 10 minutes, 10 times;
+  # - process idempotently: several matching rules may each push, and (per the
+  #   archived docs) a non-200 is retried every 10 minutes, 10 times. Key inbound
+  #   messages on +message_id+, and receipts on +message_id+ and +status_code+:
+  #   non-final codes (200, 300) mean one message can get several receipts;
   # - answer 200 quickly and do the work in a job.
   #
   # Prefer one URL per rule type with #parse_receipt / #parse_inbound; #parse
@@ -44,7 +47,7 @@ module Clicksend
   #     return head(:not_found) unless ActiveSupport::SecurityUtils.secure_compare(params[:secret].to_s, secret)
   #
   #     receipt = Clicksend::Webhook.parse_receipt(request.request_parameters)
-  #     ConfirmReceiptJob.perform_later(receipt.message_id) # client.sms.receipt(id); idempotent on id
+  #     ConfirmReceiptJob.perform_later(receipt.message_id, receipt.status_code) # idempotent on both
   #     head :ok
   #   rescue Clicksend::Webhook::InvalidPayload
   #     head :bad_request

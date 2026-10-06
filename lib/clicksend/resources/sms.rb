@@ -164,8 +164,9 @@ module Clicksend
       #     record.custom_string
       #   end
       #
-      # ClickSend documents one search filter per request (+q=field:value+), so
-      # at most one of +to+, +from+, +status+ and +message_id+ may be given.
+      # For history ClickSend documents a single +q=field:value+ filter (its
+      # general search docs describe more, but not for this endpoint), so at
+      # most one of +to+, +from+, +status+ and +message_id+ may be given.
       # +custom_string+ is not a documented filter: match on it yourself.
       #
       # This is the closest documented way to look for an ambiguous send (an

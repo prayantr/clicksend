@@ -127,7 +127,7 @@ A missing credential raises `Clicksend::ConfigurationError` straight away, not o
 | `logger` | `nil` | Any object with `#info`/`#warn`, e.g. `Rails.logger` |
 | `instrumenter` | none | e.g. `ActiveSupport::Notifications` ([events](#logging-instrumentation-and-thread-safety)) |
 | `base_url` | `https://rest.clicksend.com` | HTTPS only (HTTP is allowed for `localhost`) |
-| `adapter` | Net::HTTP | Faraday adapter, e.g. `[:net_http_persistent, {pool_size: 5}]` |
+| `adapter` | Net::HTTP | Faraday adapter; for persistent connections see [thread safety](#logging-instrumentation-and-thread-safety) |
 | `transport` | Faraday | Replaces the HTTP layer entirely (see [Testing](#testing-your-application)) |
 
 Clients are immutable. `with` returns a copy with some settings changed. That is useful for
@@ -296,7 +296,7 @@ class ClicksendWebhooksController < ActionController::API
     return head(:not_found) unless ActiveSupport::SecurityUtils.secure_compare(params[:secret].to_s, secret)
 
     receipt = Clicksend::Webhook.parse_receipt(request.request_parameters) # => Clicksend::SMS::Receipt
-    TrackDeliveryJob.perform_later(receipt.message_id)                      # idempotent on message_id
+    TrackDeliveryJob.perform_later(receipt.message_id, receipt.status_code) # idempotent on both
     head :ok
   rescue Clicksend::Webhook::InvalidPayload
     head :bad_request
@@ -313,8 +313,11 @@ secret isn't kept in `#raw`.
 > `Clicksend::Webhook` API may change in a minor release.
 
 **ClickSend documents no way to authenticate webhooks.** There is no documented signature, shared
-secret or IP range, so treat anyone who learns the URL as able to send a fake receipt. This gem
-therefore offers no "verify" method. Instead:
+secret or HMAC. ClickSend's current documentation lists no source IP addresses; archived help pages
+(around 2019–2021, no longer published) listed some and said pushes come from a fixed pool. That
+list can't be checked against today's infrastructure, so this gem doesn't support or recommend IP
+allowlisting. Treat anyone who learns the URL as able to send a fake receipt. This gem therefore
+offers no "verify" method. Instead:
 - put an unguessable secret in the URL, compare it in constant time, and use HTTPS. A secret in the
   path appears in access logs (Rails logs the path, and proxies and APM tools often keep it), so
   restrict who can read them, and filter `body`, `from` and `to` with `filter_parameter_logging`;
@@ -323,8 +326,12 @@ therefore offers no "verify" method. Instead:
   inbound message can't be fetched by its ID through any wrapped or verified endpoint; the closest
   check is `client.sms.history(from: number)`. Be careful acting on unconfirmed replies such as
   "STOP";
-- handle pushes idempotently by `message_id`: several rules can match, and (according to
-  ClickSend's archived docs) a non-200 answer is retried every 10 minutes, up to 10 times;
+- handle pushes idempotently. Several rules can match, and (according to ClickSend's archived docs)
+  a non-200 answer is retried every 10 minutes, up to 10 times. Key inbound messages on
+  `message_id`. Key receipts on `message_id` **and** `status_code`: ClickSend's gateway codes include
+  states that aren't final (200, 300), so one message can legitimately produce more than one
+  receipt, and deduplicating on `message_id` alone could discard the final 201 or 301. When
+  receipts for a message disagree, prefer a final code;
 - answer 200 quickly and do the work in a job.
 
 Inbound rules post form fields by default, or use a query string (`webhook_type: "get"`) or JSON
@@ -345,9 +352,11 @@ client.sms.history(date_from: Time.now - 86_400, to: "+61411111111").auto_paging
 end
 ```
 
-ClickSend documents one search filter per request, so `history` takes at most one of `to:`,
-`from:`, `status:` and `message_id:`, plus `date_from:`, `date_to:` and `order:` (`:asc` or
-`:desc`). `custom_string` isn't a documented filter; match it yourself.
+For this endpoint ClickSend documents a single `q=field:value` filter. Its general search
+documentation also describes several comma-separated fields with an `operator`, but not for history,
+and that hasn't been verified here. So `history` takes at most one of `to:`, `from:`, `status:` and
+`message_id:`, plus `date_from:`, `date_to:` and `order:` (`:asc` or `:desc`). `custom_string` isn't
+a documented filter; match it yourself.
 
 ## Account balance
 
@@ -510,6 +519,13 @@ Ambiguous errors are rescued inside `perform`, so `retry_on` only sees errors th
 not processed. When `retry_on` gives up, Rails re-raises the error and your queue backend may
 retry the job again.
 
+**Never wrap a send in `Timeout.timeout`.** It interrupts the thread at an arbitrary point, which can
+be after ClickSend has already received the message, and raises a plain `Timeout::Error`. That isn't
+a `Clicksend::Error` and isn't marked ambiguous, so neither the gem nor the recipe above can tell
+that the message may have gone out, and a job runner will retry the job and may send it twice. Use
+the client's own timeouts instead (for a job, e.g. `CLICKSEND.with(timeout: 10)`): a read timeout
+then raises an ambiguous `Clicksend::TimeoutError` that the recipe handles.
+
 **Job runners are at-least-once.** If a worker is killed or shut down mid-send (Sidekiq's default
 shutdown timeout, 25s, is shorter than the gem's 30s read timeout), the job runs again and the
 gem never sees the first attempt's outcome. If a duplicate matters, record that a send is in
@@ -578,11 +594,33 @@ contain no phone numbers or message text. Paths and `operation:` labels you pass
 are reported as you wrote them, minus any query string or fragment. (An exception object attached
 by ActiveSupport carries the response body of an API error, as `#body` does.)
 
-A `Clicksend::Client` is frozen after construction and holds no mutable state. The default
-Net::HTTP adapter opens a connection per request, which costs a TLS handshake each time; for
-high volumes, `adapter: [:net_http_persistent, {pool_size: 5}]` reuses connections (add the
-`faraday-net_http_persistent` gem). Share one client across threads, Puma workers and Sidekiq
-jobs. Loggers and instrumenters are called on the calling thread and must be thread-safe.
+**OpenTelemetry and other generic HTTP instrumentation.** Auto-instrumentation of Faraday or
+Net::HTTP (for example `opentelemetry-instrumentation-faraday`) works below this gem and records the
+full request URL, query string included. `sms.history(to: ...)` sends `q=to:+61...`, so recipients'
+phone numbers can end up in your traces. Configure that instrumentation to drop or sanitise URLs and
+query strings, or exclude ClickSend's host from it. ClickSend-specific tracing built on this gem's
+`request.clicksend` events doesn't have the problem, because those payloads never contain a query
+string. A dedicated adapter that does this (`clicksend-opentelemetry`) is planned but not released.
+
+A `Clicksend::Client` is frozen after construction and holds no mutable state. Share one client
+across threads, Puma workers and Sidekiq jobs. Loggers and instrumenters are called on the calling
+thread and must be thread-safe.
+
+The default Net::HTTP adapter opens a connection per request, which costs a TCP and TLS handshake
+each time. For high volumes, the `faraday-net_http_persistent` gem reuses connections:
+
+```ruby
+threads = ENV.fetch("RAILS_MAX_THREADS", 5).to_i # every thread that shares this client
+CLICKSEND = Clicksend::Client.new(adapter: [:net_http_persistent, {pool_size: threads}])
+```
+
+The pool must be **at least as large as the number of threads sharing the client** (Puma's
+threads, Sidekiq's concurrency). A thread that can't get a connection in time fails with a
+timeout, and the gem can't tell that nothing was sent, so a send fails as ambiguous. With this
+adapter, a refused connection or connect timeout is also reported as possibly sent. Neither case
+sends anything twice, but both can leave a message unsent that the default adapter would have
+retried. Build the client once (`with` creates a new pool), and note that this adapter isn't part
+of this gem's test suite.
 
 ## Testing your application
 
