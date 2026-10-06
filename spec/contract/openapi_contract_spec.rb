@@ -26,6 +26,14 @@ module OpenAPIContract
     message_price custom_string list_id country carrier date schedule
   ].freeze
 
+  # Fields SMS::Message and SMS::Batch read from a POST /v3/sms/send result.
+  # +status+ and +message_id+ matter most: a missing status is treated as an
+  # unknown outcome, so a rename would turn every send into an ambiguous error.
+  SEND_MESSAGE_FIELDS = %w[
+    message_id status to from body message_parts message_price custom_string list_id country carrier date schedule
+  ].freeze
+  SEND_RESULT_FIELDS = %w[messages total_price total_count queued_count blocked_count _currency].freeze
+
   # The q=field:value fields sms.history lets callers filter on.
   HISTORY_FILTERS = %w[to from status message_id].freeze
 
@@ -65,6 +73,34 @@ RSpec.describe "ClickSend OpenAPI contract", :contract do
         expect(op).not_to be_nil, "#{verb.upcase} #{path} is no longer in #{file}"
         declared = (op["parameters"] || []).select { |param| param["in"] == "query" }.map { |param| param["name"] }
         expect(query_params - declared).to eq([])
+      end
+    end
+  end
+
+  describe "send results" do
+    let(:sms_doc) { OpenAPIFixtures.document("messaging/sms.yaml") }
+    let(:result) { OpenAPIFixtures.resolve(sms_doc, OpenAPIFixtures.response_schema(sms_doc, "/v3/sms/send", "post").dig("properties", "data")) }
+    let(:message) { OpenAPIFixtures.resolve(sms_doc, OpenAPIFixtures.resolve(sms_doc, result.dig("properties", "messages"))["items"]) }
+
+    it "documents every field SMS::Batch reads" do
+      expect(OpenAPIContract::SEND_RESULT_FIELDS - result["properties"].keys).to eq([])
+    end
+
+    it "documents every field SMS::Message reads" do
+      expect(OpenAPIContract::SEND_MESSAGE_FIELDS - message["properties"].keys).to eq([])
+    end
+
+    it "documents the per-message status and message ID as strings" do
+      expect(message.dig("properties", "status", "type")).to eq("string")
+      expect(message.dig("properties", "message_id", "type")).to eq("string")
+    end
+  end
+
+  describe "list page sizes" do
+    %w[/v3/sms/receipts /v3/sms/inbound].each do |path|
+      it "keeps the page-size range Page enforces for #{path}" do
+        limit = operation("messaging/sms.yaml", "get", path)["parameters"].find { |param| param["name"] == "limit" }["schema"]
+        expect([limit["minimum"], limit["maximum"]]).to eq([Clicksend::Page::LIMITS.min, Clicksend::Page::LIMITS.max])
       end
     end
   end
