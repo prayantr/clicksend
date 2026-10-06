@@ -52,6 +52,13 @@ notice, such as `Marshal.dump(client)` now raising and stricter `Retry-After` pa
   another thread, or after swallowing an exception that escaped the request, the call raises a
   `ConfigurationError` that is also an `AmbiguousRequestError` unless the request is idempotent
   (before, `Client#request` could return nil while the send went ahead).
+- **A `ScriptError` from code outside the gem is handled like any other failure.** A logger or
+  instrumenter raising `NotImplementedError` or `LoadError` after a send was accepted escaped as a
+  non-Clicksend error (also in 1.1); job runners such as Sidekiq rescue `Exception` and would run
+  the job, and the send, again. Loggers, instrumenters, retry policies and custom transports are
+  now treated the same for `StandardError` and `ScriptError`: the request's own result or error
+  wins, and a custom transport's `ScriptError` is an ambiguous `ConnectionError` for a send.
+  `Interrupt`, `SystemExit` and `NoMemoryError` still propagate.
 - **`Clicksend::Client` refuses `Marshal.dump`** (`TypeError`), including inside another object
   such as `client.sms`. A client holds the API key, which `Marshal` used to write out in clear
   (e.g. into a cache or a job payload). Build a new client instead. Responses and errors can still
