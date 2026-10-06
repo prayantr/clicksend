@@ -255,13 +255,18 @@ module Clicksend
       # nil when ClickSend answers SUCCESS; ClickSend's response carries no
       # data (+data+ is deprecated and always null).
       #
-      #   message = client.sms.deliver(to: "+61411111111", body: "Reminder", schedule: Time.now + 3600)
+      # *Experimental*: the SUCCESS answer is covered by contract specs but
+      # has not been observed live. ClickSend's free test number completes
+      # scheduled messages at once, and cancelling them answered 404
+      # NOT_FOUND (raised as NotFoundError), as did a repeated cancel and an
+      # unknown ID. A NotFoundError therefore doesn't say why, and doesn't
+      # mean the message was sent.
+      #
+      #   message = client.sms.deliver(to: user.phone, body: "Reminder", schedule: Time.now + 3600)
       #   client.sms.cancel(message.message_id)
       #
-      # ClickSend documents only the successful case. What it answers for a
-      # message that was already sent, already cancelled or doesn't exist is
-      # undocumented, so don't treat "no exception" as "the message will not
-      # go out" for those: check #history(message_id:) for status "Cancelled".
+      # Don't treat "no exception" as "the message will not go out": check
+      # #history(message_id:) for status "Cancelled" when it matters.
       #
       # Not retried after a timeout or 5xx (ClickSend documents no idempotency
       # for it). Such a failure is a Clicksend::AmbiguousRequestError: the

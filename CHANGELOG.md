@@ -6,16 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Planned as 1.2.0. Mostly additive. "Fixed" lists behaviour changes an existing application may
-notice, such as `Marshal.dump(client)` now raising and stricter `Retry-After` parsing.
+## [1.2.0] - 2026-10-06
+
+Cancelling and reconciling messages, test-framework helpers, opt-in persistent connections, and
+hardening. Mostly additive. "Fixed" lists behaviour changes an existing application may notice,
+such as `Marshal.dump(client)` and `YAML.dump(client)` now raising and stricter `Retry-After`
+parsing. `sms.cancel` is **experimental** and may change in a minor release: its successful answer
+has not been observed live (see below). The OpenTelemetry instrumenter is a separate gem,
+`clicksend-opentelemetry` (`companions/`), released on its own schedule.
 
 ### Added
 
-- `sms.cancel(message_id)` cancels one scheduled SMS (`PUT /v3/sms/{message_id}/cancel`) and
-  returns nil. ClickSend documents only the successful answer, and no idempotency, so it is not
-  retried after a timeout or 5xx; such a failure is an `AmbiguousRequestError` (the message may or
-  may not have been cancelled). Check `sms.history(message_id:)` for the status `"Cancelled"`
-  when it matters. `PUT /v3/sms/cancel-all` is still deliberately not wrapped.
+- **`sms.cancel(message_id)` (experimental)** cancels one scheduled SMS
+  (`PUT /v3/sms/{message_id}/cancel`) and returns nil. ClickSend documents only the successful
+  answer, and no idempotency, so it is not retried after a timeout or 5xx; such a failure is an
+  `AmbiguousRequestError` (the message may or may not have been cancelled). Check
+  `sms.history(message_id:)` for the status `"Cancelled"` when it matters.
+  `PUT /v3/sms/cancel-all` is still deliberately not wrapped.
+  The successful 200 `SUCCESS` answer is covered by contract specs but was **not observed live**:
+  ClickSend's free test number doesn't hold scheduled messages (they show as `Completed` within
+  seconds), so it can't exercise a successful cancel. Live cancels of those test-number messages,
+  a repeated cancel and a random ID all answered HTTP 404 `NOT_FOUND`, raised as
+  `Clicksend::NotFoundError`. A 404 doesn't say which case applies; it does not mean "already
+  sent". The API may change in a minor release once a real cancellation has been observed.
 - `sms.search_history(to:, custom_string:, sent_after:, sent_before: nil)` returns the outbound
   history rows ClickSend shows now for that recipient and exact `custom_string`, possibly none. It
   widens the date window by five minutes on each side, reads every page (100 rows each), and
@@ -338,7 +351,8 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
 - Last release of the original gem: send SMS, poll replies and delivery reports, and check
   the balance through ClickSend's v2 API.
 
-[Unreleased]: https://github.com/prayantr/clicksend/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/prayantr/clicksend/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/prayantr/clicksend/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/prayantr/clicksend/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...v1.0.0
 [1.0.0.rc1]: https://github.com/prayantr/clicksend/compare/c99edc5...v1.0.0.rc1

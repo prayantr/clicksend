@@ -185,15 +185,26 @@ Unknown keywords raise `ArgumentError`, so typos can't be silently ignored.
 
 ### Cancelling a scheduled message
 
+> **Experimental in 1.2.** The successful answer (HTTP 200, `SUCCESS`) is covered by contract
+> tests against ClickSend's published API description, but has **not been observed live**.
+> ClickSend's free test number doesn't hold scheduled messages: in a live check (2026-10-06) a
+> message scheduled an hour ahead showed as `Completed` in history within seconds, so the test
+> number can't exercise a successful cancel. Cancelling those test-number messages answered
+> HTTP 404 `NOT_FOUND`, which the gem raises as `Clicksend::NotFoundError`. The API may change in a
+> minor release once a real cancellation has been observed.
+
 ```ruby
-message = client.sms.deliver(to: "+61411111111", body: "Your appointment is tomorrow", schedule: Time.now + 86_400)
+message = client.sms.deliver(to: user.phone, body: "Your appointment is tomorrow", schedule: Time.now + 86_400)
 client.sms.cancel(message.message_id) # => nil when ClickSend answers SUCCESS
 ```
 
-ClickSend documents only the successful case. What it answers for a message that was already
-sent, already cancelled or never existed is undocumented, so for those "no exception" doesn't
-prove the message won't go out. If it matters, for example before you schedule a replacement,
-check `client.sms.history(message_id: message.message_id)` for the status `"Cancelled"`.
+ClickSend documents only the successful case. In the live check, cancelling a message that was no
+longer scheduled, cancelling the same ID twice and cancelling a random ID all answered the same
+404 `NOT_FOUND` ("Record not found."). So a `NotFoundError` doesn't tell you why: the ID may be
+unknown, or the message may no longer be cancellable, and it does **not** mean the message was
+sent. Nor does "no exception" prove the message won't go out. If it matters, for example before
+you schedule a replacement, check `client.sms.history(message_id: message.message_id)` for the
+status `"Cancelled"`.
 
 `cancel` is not retried after a timeout or 5xx, because ClickSend documents no idempotency for it.
 Such a failure raises an [`AmbiguousRequestError`](#when-a-sends-outcome-is-unknown): the message
