@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Draft for 1.2.0 (spike branch `spike/1.2-api`; see `research/1.2-api-cancel-quote-history.md`).
+
+### Added
+
+- `sms.cancel(message_id)` cancels one scheduled SMS (`PUT /v3/sms/{message_id}/cancel`) and
+  returns nil. ClickSend documents only the successful answer, and no idempotency, so it is not
+  retried after a timeout or 5xx; such a failure is an `AmbiguousRequestError` (the message may or
+  may not have been cancelled). Check `sms.history(message_id:)` for the status `"Cancelled"`
+  when it matters. `PUT /v3/sms/cancel-all` is still deliberately not wrapped.
+- `sms.search_history(to:, custom_string:, sent_after:, sent_before: nil)` returns the outbound
+  history rows ClickSend shows now for that recipient and exact `custom_string`, possibly none. It
+  widens the date window by five minutes on each side, reads every page (100 rows each), and
+  requires an E.164 recipient. An empty result is not proof that nothing was sent.
+- Testing: `FakeAPI` cancels messages it holds as scheduled for the future
+  (`fake.cancelled_messages`) and raises `StubError` for every cancel ClickSend doesn't document,
+  so tests must stub that answer. `fake.stub_history(*messages, status: "Sent")` states what
+  history shows; the fake still serves no history by itself.
+
 ## [1.1.0] - 2026-10-06
 
 Failure semantics, observability and testing support for production messaging. Mostly additive;
@@ -192,6 +212,7 @@ A rewrite for ClickSend's REST v3 API and modern Ruby. See [MIGRATING.md](MIGRAT
 - Last release of the original gem: send SMS, poll replies and delivery reports, and check
   the balance through ClickSend's v2 API.
 
+[Unreleased]: https://github.com/prayantr/clicksend/compare/v1.1.0...HEAD
 [1.1.0]: https://github.com/prayantr/clicksend/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/prayantr/clicksend/compare/v1.0.0.rc1...v1.0.0
 [1.0.0.rc1]: https://github.com/prayantr/clicksend/compare/c99edc5...v1.0.0.rc1

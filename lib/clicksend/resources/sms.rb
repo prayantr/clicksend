@@ -12,6 +12,13 @@ module Clicksend
       DEFAULT_FIELDS = (MESSAGE_FIELDS - %i[to list_id body]).freeze
       MESSAGE_ID = /\A[A-Za-z0-9-]+\z/
       HISTORY_ORDERS = %i[asc desc].freeze
+      # History stores recipients in E.164 ("+61411111111"); a local or
+      # unprefixed number would not match the rows it is compared with.
+      E164 = /\A\+[1-9]\d{5,14}\z/
+      # Seconds #search_history widens its window by, on each side. ClickSend
+      # doesn't document whether date_from/date_to are inclusive or which clock
+      # history dates come from; a wider window only finds more rows.
+      HISTORY_SEARCH_MARGIN = 300
 
       def initialize(client)
         @client = client
@@ -200,6 +207,71 @@ module Clicksend
         Page.fetch(@client, "/v3/sms/history", query: query, page: page, limit: limit, operation: "sms.history") do |item|
           Clicksend::SMS::HistoryRecord.from_api(item)
         end
+      end
+
+      # The history rows ClickSend shows *now* for messages you sent to +to+
+      # with exactly this +custom_string+ since +sent_after+, oldest first.
+      # Meant for the question an AmbiguousRequestError from #deliver leaves
+      # open: did ClickSend accept that message after all?
+      #
+      #   records = client.sms.search_history(to: user.phone, custom_string: "otp:#{attempt.id}", sent_after: started_at)
+      #   records.any? # => true: ClickSend accepted it (see record.status)
+      #                #    false: nothing is known yet; this is NOT proof it wasn't sent
+      #
+      # ClickSend doesn't say how soon an accepted message appears in history,
+      # keeps history for about four months, and can de-identify recipients, so
+      # an empty result never means "not sent". Never resend automatically
+      # because of it.
+      #
+      # Queries GET /v3/sms/history with +q=to:+ and a date window widened by
+      # HISTORY_SEARCH_MARGIN seconds on each side, 100 rows per page (each
+      # page is one request against ClickSend's undocumented rate limits),
+      # then keeps outbound rows whose +to+ and +custom_string+ equal yours:
+      # +custom_string+ is not a documented filter, and ClickSend calls a +q+
+      # value a "text or keyword", not an exact match.
+      #
+      # @param to [String] the recipient, in E.164 ("+61411111111")
+      # @param custom_string [String] the reference you passed to #deliver
+      # @param sent_after [Time, Integer] a time before the send started
+      # @param sent_before [Time, Integer, nil] a time after it ended (default: no upper bound)
+      # @return [Array<Clicksend::SMS::HistoryRecord>] possibly several (a
+      #   reference reused across sends), possibly none
+      def search_history(to:, custom_string:, sent_after:, sent_before: nil)
+        unless to.is_a?(String) && to.match?(E164)
+          raise ArgumentError, "to must be an E.164 number such as \"+61411111111\" (history stores recipients that way), got #{to.inspect}"
+        end
+        raise ArgumentError, "custom_string must be a non-empty String" unless custom_string.is_a?(String) && !custom_string.empty?
+
+        from = unix_time(sent_after, "sent_after")
+        to_time = unix_time(sent_before, "sent_before") unless sent_before.nil?
+        raise ArgumentError, "sent_before must not be earlier than sent_after" if to_time && to_time < from
+
+        history(to: to, date_from: from - HISTORY_SEARCH_MARGIN, date_to: (to_time + HISTORY_SEARCH_MARGIN if to_time), limit: Page::LIMITS.max)
+          .auto_paging_each
+          .select { |record| record.outbound? && record.to == to && record.custom_string == custom_string }
+      end
+
+      # Cancels one scheduled SMS (PUT /v3/sms/{message_id}/cancel). Returns
+      # nil when ClickSend answers SUCCESS; ClickSend's response carries no
+      # data (+data+ is deprecated and always null).
+      #
+      #   message = client.sms.deliver(to: "+61411111111", body: "Reminder", schedule: Time.now + 3600)
+      #   client.sms.cancel(message.message_id)
+      #
+      # ClickSend documents only the successful case. What it answers for a
+      # message that was already sent, already cancelled or doesn't exist is
+      # undocumented, so don't treat "no exception" as "the message will not
+      # go out" for those: check #history(message_id:) for status "Cancelled".
+      #
+      # Not retried after a timeout or 5xx (ClickSend documents no idempotency
+      # for it). Such a failure is a Clicksend::AmbiguousRequestError: the
+      # message may or may not have been cancelled. Calling #cancel again
+      # cannot send anything, but may raise even if the first call worked;
+      # #history(message_id:) tells you which.
+      # @return [nil]
+      def cancel(message_id)
+        @client.request(:put, "/v3/sms/#{message_id!(message_id)}/cancel", operation: "sms.cancel")
+        nil
       end
 
       def inspect

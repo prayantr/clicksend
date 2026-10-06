@@ -9,7 +9,9 @@ module Clicksend
     SentMessage = Data.define(:message_id, :to, :from, :body, :custom_string, :list_id, :scheduled_at, :country, :sent_at)
 
     # Raised when test code given to the FakeAPI (a #stub block, or the
-    # +clock:+) raises a StandardError or ScriptError, i.e. has a bug. It is
+    # +clock:+) raises a StandardError or ScriptError, i.e. has a bug, or when
+    # a test asks the fake for an answer ClickSend doesn't document (such as
+    # cancelling a message that is not scheduled), which it must #stub. It is
     # deliberately not a StandardError, so the client does not report it as a
     # ClickSend failure (connection error, retry, "ambiguous" send): a typo in
     # a stub must fail the test, not satisfy it. Other exceptions (Ctrl-C,

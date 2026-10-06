@@ -35,6 +35,12 @@ Sources:
 | Idempotency | No idempotency key on any operation (all 34 sections searched) | Sends are never retried after timeouts or 5xx |
 | `THROTTLED` | Application code: "Identical message body recently sent to the same recipient." Window and placement undocumented | Treated as an ordinary rejection; never relied on for deduplication |
 | History search | `GET /v3/sms/history`: `date_from`, `date_to`, `order_by` (`date:asc` default), `page`, `limit`, and `q=field:value` for `status`, `to`, `from`, `subaccount_id`, `message_id`. `custom_string` is **not** a filter | `sms.history` takes one of `to:`, `from:`, `status:`, `message_id:`; match `custom_string` yourself |
+| Combining search filters | The general "Searching and Sorting" section shows `q=field:value,field2:value`, `AND` by default, and `operator=OR`; searches are "**not** case-sensitive". The history operation itself documents one `field_name:value` and no `operator`, and calls the value "the text or keyword you're searching for" (exact or partial match unstated) | `sms.history` sends one filter; `sms.search_history` re-checks `to` and `custom_string` for exact equality |
+| History retention | Help 43125: message data is kept for four months, then archived and "no longer available to view in the Dashboard, or downloadable from the History page or API". De-identification (on request) obfuscates `to` "in any history downloads" | Another reason an empty history search proves nothing |
+| History consistency | **None documented**: no statement anywhere (current, archived or help) on how soon an accepted send appears in `GET /v3/sms/history` | `search_history` returns rows only; never "not sent" |
+| Cancel one scheduled SMS | `PUT /v3/sms/{message_id}/cancel`, no body; 200 example `response_msg: "Scheduled sms message has been cancelled."`, `data` "deprecated and will return null" (archived 2022: `data: []`, message naming the ID). Answers for an unknown, sent or already-cancelled ID, and idempotency, are **undocumented** | `sms.cancel`, not idempotent: never retried after a timeout or 5xx |
+| Cancel all scheduled SMS | `PUT /v3/sms/cancel-all`; optional body `custom_string` limits it to messages with that value (match semantics undocumented); without it, every scheduled SMS is cancelled. Returns `data.count` | Deliberately not wrapped |
+| Price quote | `POST /v3/sms/price`: "calculate the price of sending messages". The only statement about effects is in the `sms` schema's `date`: it may be empty "in price-calculation responses where no message has actually been sent yet". The example returns a `message_id` | Not wrapped; `client.request` treats it as non-idempotent |
 | Webhooks (push) | Automation rules with the `URL` action. Inbound rules: `webhook_type` `post` (form, default), `get` or `json` (format unspecified). Receipts: form-encoded POST according to the archived v3 docs (help 42270 covers inbound rules only). **No payload schema** in the current docs; the archived docs list the fields, matching the poll schemas plus `user_id` and (receipts) `status`. Archived: a non-200 is retried every 10 minutes, 10 times | `Clicksend::Webhook` parses into `SMS::Receipt` / `SMS::InboundMessage` |
 | Webhook authentication | **None documented.** No signature, HMAC or shared secret in any current, archived or help source. Current docs list no source IP addresses; archived help pages (around 2019–2021, no longer published) listed six and said pushes come from a fixed pool | No verification method and no IP allowlisting; README prescribes a secret URL and confirming via the API |
 | Request ID | None documented; no spec declares any response header | `Error#request` describes the call instead |
@@ -160,6 +166,10 @@ test accounts:
       poll schemas and the archived docs
 - [ ] How soon a sent message appears in history, and whether `date_from`/`date_to` are inclusive
 - [ ] Where and when `THROTTLED` is returned
+- [ ] What `PUT /v3/sms/{message_id}/cancel` answers for a second cancel, an already-sent message
+      and an unknown ID (protocol in `research/1.2-api-cancel-quote-history.md`)
+- [ ] Whether `POST /v3/sms/price` changes anything: balance, history, `THROTTLED`, rate limits
+- [ ] Whether history's `q=to:` matches exactly or by substring
 - [ ] Rate limits for endpoints other than `GET /v3/account`
 
 ## Retry safety: the rules and why

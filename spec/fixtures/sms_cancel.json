@@ -1,0 +1,6 @@
+{
+  "http_code": 200,
+  "response_code": "SUCCESS",
+  "response_msg": "Scheduled sms message has been cancelled.",
+  "data": null
+}

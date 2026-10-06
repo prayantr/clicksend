@@ -64,7 +64,7 @@ message.message_id # => "1ABC3200-C38C-6308-BE4B-C7C51D01DCF0"
 | You want to… | Use |
 |---|---|
 | Send SMS from a Ruby app and track delivery and replies, with safe defaults, typed errors, instrumentation and a test fake | **this gem** |
-| Call the occasional ClickSend endpoint this gem doesn't wrap (price a message, cancel a scheduled one, list templates) with the same authentication, timeouts, retry rules and errors | **this gem's [`client.request`](#calling-other-clicksend-endpoints)** |
+| Call the occasional ClickSend endpoint this gem doesn't wrap (price a message, list templates, view statistics) with the same authentication, timeouts, retry rules and errors | **this gem's [`client.request`](#calling-other-clicksend-endpoints)** |
 | Work with large parts of the API (email, campaigns, contacts, numbers, automations, subaccounts, and so on) with generated models for each | ClickSend's official SDK, [`clicksend_client`](https://rubygems.org/gems/clicksend_client) |
 
 The two gems can be used side by side ([namespaces differ](#using-it-alongside-the-official-sdk)).
@@ -183,6 +183,26 @@ Unknown keywords raise `ArgumentError`, so typos can't be silently ignored.
 > ClickSend currently pauses SMS containing URLs for new customers until URL messaging is
 > approved ([docs](https://developers.clicksend.com/docs/messaging/sms)).
 
+### Cancelling a scheduled message
+
+```ruby
+message = client.sms.deliver(to: "+61411111111", body: "Your appointment is tomorrow", schedule: Time.now + 86_400)
+client.sms.cancel(message.message_id) # => nil when ClickSend answers SUCCESS
+```
+
+ClickSend documents only the successful case. What it answers for a message that was already
+sent, already cancelled or never existed is undocumented, so for those "no exception" doesn't
+prove the message won't go out. If it matters, for example before you schedule a replacement,
+check `client.sms.history(message_id: message.message_id)` for the status `"Cancelled"`.
+
+`cancel` is not retried after a timeout or 5xx, because ClickSend documents no idempotency for it.
+Such a failure raises an [`AmbiguousRequestError`](#when-a-sends-outcome-is-unknown): the message
+may or may not have been cancelled. Calling `cancel` again can't send anything, but may raise even
+if the first call worked; history tells you which.
+
+There is deliberately no wrapper for `PUT /v3/sms/cancel-all`: without a `custom_string` filter it
+cancels every scheduled message on the account.
+
 ### Many messages in one request
 
 ```ruby
@@ -231,17 +251,26 @@ message ClickSend refused) are not ambiguous. Apart from the refused connection,
 inference from ClickSend's documentation and observed behaviour, not a guarantee. An error ClickSend reports inside a 2xx
 answer is ambiguous whatever its code, because that behaviour is undocumented.
 
-To check, look the message up in [history](#message-history) by recipient and match your own
-`custom_string`:
+To check, search [history](#message-history) for your recipient and `custom_string`:
 
 ```ruby
-sent = client.sms.history(to: user.phone, date_from: started_at - 60)
-  .auto_paging_each.find { |record| record.custom_string == "otp:#{attempt.id}" }
+records = client.sms.search_history(to: user.phone, custom_string: "otp:#{attempt.id}", sent_after: started_at)
+records.any?  # true: ClickSend accepted it (records.first.status says how far it got)
+              # false: nothing is known yet. This is NOT proof that it wasn't sent.
 ```
 
-ClickSend doesn't document how soon a sent message appears in history, so **a message missing
-from history is not proof that it wasn't sent**. Whether to resend is your decision: for a login
-code, letting the user request another is usually safer than resending automatically.
+`search_history` asks for the recipient's history (`q=to:`) from five minutes before
+`sent_after` (ClickSend doesn't say whether its date filters are inclusive or which clock they
+use), reads every page, and keeps only outbound rows whose `to` and `custom_string` are exactly
+yours: `custom_string` isn't a filter ClickSend offers, and it calls a filter value a "text or
+keyword", not an exact match. `to` must be E.164 (`"+61411111111"`), the form history stores.
+Each page of 100 rows is one request against ClickSend's undocumented rate limits.
+
+ClickSend doesn't document how soon a sent message appears in history, keeps history for about
+four months, and can de-identify recipients on request, so **an empty result is not proof that
+nothing was sent**. Whether to resend is your decision: for a login code, letting the user
+request another is usually safer than resending automatically. Use a `custom_string` that is
+unique to the message (not to the attempt), so a match from an earlier attempt counts.
 
 ## Delivery receipts and replies
 
@@ -356,7 +385,7 @@ For this endpoint ClickSend documents a single `q=field:value` filter. Its gener
 documentation also describes several comma-separated fields with an `operator`, but not for history,
 and that hasn't been verified here. So `history` takes at most one of `to:`, `from:`, `status:` and
 `message_id:`, plus `date_from:`, `date_to:` and `order:` (`:asc` or `:desc`). `custom_string` isn't
-a documented filter; match it yourself.
+a documented filter; match it yourself, or use [`search_history`](#when-a-sends-outcome-is-unknown).
 
 ## Account balance
 
@@ -543,7 +572,7 @@ response.data           # the envelope's "data" (frozen Hash/Array)
 response.response_code  # => "SUCCESS"
 response.http_status; response.headers; response.body
 
-client.request(:put, "/v3/sms/#{message_id}/cancel")
+client.request(:get, "/v3/statistics/sms", operation: "statistics.sms")
 client.request(:get, "/v3/sms/templates", query: {page: 2})
 
 # Any paginated list, as raw Hashes:
@@ -674,9 +703,22 @@ The fake also serves receipts, replies (marked read as ClickSend documents; whet
 inclusive is the fake's guess) and the account. Exceptions raised by your stub blocks surface as
 `Clicksend::Testing::StubError`, never as a simulated ClickSend failure.
 
-It deliberately **doesn't serve history**: ClickSend doesn't say how soon a sent message appears
-there, and an always-current fake history would let a "not in history, so resend" rule pass its
-tests and send twice in production. Stub `GET /v3/sms/history` with the rows each test needs.
+It deliberately **doesn't serve history by itself**: ClickSend doesn't say how soon a sent message
+appears there, and an always-current fake history would let a "not in history, so resend" rule
+pass its tests and send twice in production. Say what history shows at each point of your test:
+
+```ruby
+fake.stub_history                                              # nothing (yet)
+fake.stub_history(fake.sent_messages.last)                     # this message, status "Sent"
+fake.stub_history(fake.sent_messages.last, status: "Cancelled")
+```
+
+Every history request then gets exactly those rows, whatever its filters.
+
+`client.sms.cancel` works on a message the fake accepted with a schedule still in the future, and
+the message then appears in `fake.cancelled_messages` (it stays in `sent_messages`). ClickSend
+doesn't document what it answers for any other message, so the fake raises `StubError` instead of
+guessing; `fake.stub(:put, "/v3/sms/#{id}/cancel") { ... }` states the answer your test assumes.
 
 The fake simplifies, so don't let your tests depend on these:
 - Recipients that aren't 6 to 15 digits (optionally after `+`) get `INVALID_RECIPIENT`; ClickSend's
@@ -711,7 +753,8 @@ per-message status `COUNTRY_NOT_ENABLED`, which `deliver` raises as `MessageReje
 | Send SMS (single, batch, lists, scheduled) | `POST /v3/sms/send` | `sms.deliver`, `sms.deliver_batch` |
 | Delivery receipts | `GET /v3/sms/receipts[/{id}]`, `PUT /v3/sms/receipts-read` | `sms.receipts`, `sms.receipt`, `sms.mark_receipts_read` |
 | Replies (inbound SMS) | `GET /v3/sms/inbound`, `PUT /v3/sms/inbound-read[/{id}]` | `sms.inbound`, `sms.mark_inbound_read`, `sms.mark_inbound_message_read` |
-| Message history | `GET /v3/sms/history` | `sms.history` |
+| Cancel a scheduled SMS | `PUT /v3/sms/{message_id}/cancel` | `sms.cancel` |
+| Message history | `GET /v3/sms/history` | `sms.history`, `sms.search_history` |
 | Pushed receipts and replies (webhooks) | automation rules with the URL action | `Clicksend::Webhook` |
 | Account balance | `GET /v3/account` | `account.fetch` |
 | Testing without the network | | `Clicksend::Testing::FakeAPI` |
@@ -721,6 +764,10 @@ per-message status `COUNTRY_NOT_ENABLED`, which `deliver` raises as `MessageReje
 Deliberately **not** wrapped:
 - Fax and post. ClickSend no longer offers them to new customers.
 - Email, payments and recharge, and reseller features.
+- Price quotes (`POST /v3/sms/price`). ClickSend says a quote sends no message, but not that it
+  is free of other effects (it returns a `message_id`); call it through `client.request`, which
+  treats it as not safe to repeat.
+- Cancelling every scheduled message (`PUT /v3/sms/cancel-all`).
 
 For broad coverage, use ClickSend's official SDK. Notes on ambiguities in ClickSend's
 documentation that affect this gem are in [docs/clicksend-api-notes.md](docs/clicksend-api-notes.md).

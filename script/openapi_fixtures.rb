@@ -25,7 +25,8 @@ module OpenAPIFixtures
     "sms_receipts_read" => ["messaging/sms.yaml", "/v3/sms/receipts-read", "put"],
     "sms_inbound" => ["messaging/sms.yaml", "/v3/sms/inbound", "get"],
     "sms_inbound_read" => ["messaging/sms.yaml", "/v3/sms/inbound-read", "put"],
-    "sms_inbound_message_read" => ["messaging/sms.yaml", "/v3/sms/inbound-read/{message_id}", "put"]
+    "sms_inbound_message_read" => ["messaging/sms.yaml", "/v3/sms/inbound-read/{message_id}", "put"],
+    "sms_cancel" => ["messaging/sms.yaml", "/v3/sms/{message_id}/cancel", "put"]
   }.freeze
 
   module_function

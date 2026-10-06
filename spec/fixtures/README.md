@@ -19,6 +19,7 @@ ruby script/openapi_fixtures.rb      # regenerate this directory
 | `sms_inbound.json` | `GET /v3/sms/inbound` | verbatim example |
 | `sms_inbound_read.json` | `PUT /v3/sms/inbound-read` | assembled from per-property examples |
 | `sms_inbound_message_read.json` | `PUT /v3/sms/inbound-read/{message_id}` | verbatim example |
+| `sms_cancel.json` | `PUT /v3/sms/{message_id}/cancel` | verbatim example (`data` is deprecated and null) |
 
 They are kept exactly as published, including places where ClickSend's examples
 disagree with its schemas (listed in `spec/contract/openapi_contract_spec.rb`).

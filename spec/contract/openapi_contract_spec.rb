@@ -17,7 +17,8 @@ module OpenAPIContract
     ["messaging/sms.yaml", "get", "/v3/sms/inbound", %w[page limit]],
     ["messaging/sms.yaml", "put", "/v3/sms/inbound-read", []],
     ["messaging/sms.yaml", "put", "/v3/sms/inbound-read/{message_id}", []],
-    ["messaging/sms.yaml", "get", "/v3/sms/history", %w[page limit q order_by date_from date_to]]
+    ["messaging/sms.yaml", "get", "/v3/sms/history", %w[page limit q order_by date_from date_to]],
+    ["messaging/sms.yaml", "put", "/v3/sms/{message_id}/cancel", []]
   ].freeze
 
   # Fields SMS::HistoryRecord reads from a history row.
@@ -44,7 +45,8 @@ module OpenAPIContract
     "account" => ["/data/balance_commission"],           # number in example, string in schema
     "sms_send" => ["/data/messages/0/date"],             # "1721099039," in example, integer in schema
     "sms_receipts" => ["/data/data/0/status_code", "/data/data/0/digits"], # "201" vs integer; null vs non-nullable
-    "sms_receipt" => ["/data/status_code", "/data/digits"]
+    "sms_receipt" => ["/data/status_code", "/data/digits"],
+    "sms_cancel" => ["/data"]                            # null in example; schema type object, described as "will return null"
   }.freeze
 end
 
@@ -128,6 +130,28 @@ RSpec.describe "ClickSend OpenAPI contract", :contract do
     it "keeps the documented page-size range Page enforces" do
       limit = history_op["parameters"].find { |param| param["name"] == "limit" }["schema"]
       expect([limit["minimum"], limit["maximum"]]).to eq([Clicksend::Page::LIMITS.min, Clicksend::Page::LIMITS.max])
+    end
+  end
+
+  describe "cancelling scheduled messages" do
+    let(:sms_doc) { OpenAPIFixtures.document("messaging/sms.yaml") }
+
+    it "documents no request body for cancelling one message, which sms.cancel doesn't send" do
+      expect(operation("messaging/sms.yaml", "put", "/v3/sms/{message_id}/cancel")).not_to have_key("requestBody")
+      transport = FakeTransport.new(FakeTransport.json(200, fixture("sms_cancel")))
+      client(transport: transport).sms.cancel("1EF50711-2787-68F4-8223-9F9C4393E380")
+      expect(transport.calls.last.body).to be_nil
+    end
+
+    it "still documents cancel's data as deprecated, so sms.cancel returns nothing" do
+      data = OpenAPIFixtures.resolve(sms_doc, OpenAPIFixtures.response_schema(sms_doc, "/v3/sms/{message_id}/cancel", "put").dig("properties", "data"))
+      expect(data["description"]).to match(/deprecated/i), "cancel's data is no longer deprecated: consider returning it from sms.cancel"
+    end
+
+    it "still lets cancel-all run without a filter, which is why it is not wrapped" do
+      body = operation("messaging/sms.yaml", "put", "/v3/sms/cancel-all").dig("requestBody", "content", "application/json", "schema")
+      expect(body.fetch("required", [])).to eq([]),
+        "cancel-all now requires a filter: revisit the decision not to wrap it (research/1.2-api-cancel-quote-history.md)"
     end
   end
 
