@@ -24,7 +24,8 @@ Planned as 1.1.0. Mostly additive; read "Changed" before upgrading. Two addition
   predicate. (A `dup` of the error loses the mark; `clone` and re-raising keep it.)
 - **Request context on errors and responses.** `Error#request` and `Response#request` return a
   `Clicksend::RequestInfo` with `http_method`, `path` (no query string or fragment), `operation`
-  (e.g. `"sms.deliver"`), `idempotent` and `attempts`.
+  (e.g. `"sms.deliver"`), `idempotent` and `attempts`. `Response#request` is not a `Data`
+  member, so `Response` equality, `to_h` and pattern matching are unchanged from 1.0.
 - `Error#retryable?`: whether repeating the same request later is both safe and might succeed.
 - **Retry configuration.** `Clicksend::RetryPolicy` is public:
   `Client.new(retry_policy: RetryPolicy.new(max_retries:, base_delay:, max_delay:, max_retry_after:))`.
@@ -85,10 +86,6 @@ Behaviour an existing 1.0 application may notice:
   - `RetryPolicy.new` validates its arguments (`ConfigurationError`) and returns a frozen policy.
   - `Client#request(idempotent:)` honours only `true`; other truthy values, such as `1` or
     `"false"`, no longer make a request retryable.
-- **`Clicksend::Response` has a fourth member, `request`.** Keyword and positional construction
-  with three values still works, but `#to_h`, `#deconstruct` and `==` now include it: an
-  application spec comparing `client.request(...)` with
-  `Response.new(http_status:, headers:, body:)` needs updating.
 
 ### Documentation
 
