@@ -21,6 +21,40 @@ RSpec.describe "Documentation examples" do
     end
   end
 
+  describe "README examples that run as written" do
+    before { require "clicksend/testing" }
+
+    def readme_block(containing)
+      ruby_blocks("README.md").find { |code| code.include?(containing) } or raise "no README example contains #{containing.inspect}"
+    end
+
+    it "the FakeAPI walkthrough" do
+      code = readme_block("fake = Clicksend::Testing::FakeAPI.new")
+      result = Module.new.module_eval(code + "\n[fake, client]")
+      fake, client = result
+      expect(client).to be_a(Clicksend::Client)
+      expect(fake.requests).to be_empty # reset! ran last
+    end
+
+    it "every fail_next example is accepted" do
+      fake = Clicksend::Testing::FakeAPI.new
+      code = readme_block("fake.fail_next(:timeout, processed: true)")
+      expect { binding.tap { |b| b.local_variable_set(:fake, fake) }.eval(code) }.not_to raise_error
+    end
+
+    it "the ambiguous-send rescue, against the fake" do
+      fake = Clicksend::Testing::FakeAPI.new
+      fake.fail_next(:timeout, processed: true)
+      user = Struct.new(:phone).new("+61411111111")
+      attempt = Struct.new(:id).new(42)
+      client = fake.client
+      text = "Your code is 481516"
+      code = readme_block("rescue Clicksend::AmbiguousRequestError => e")
+      expect { binding.eval(code) }.not_to raise_error # standard:disable Security/Eval -- evaluates this repository's own README
+      expect(fake.sent_messages.size).to eq(1)
+    end
+  end
+
   it "finds the README's examples" do
     expect(ruby_blocks("README.md").size).to be > 20
   end

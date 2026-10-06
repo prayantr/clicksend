@@ -550,7 +550,52 @@ jobs. Loggers and instrumenters are called on the calling thread and must be thr
 
 ## Testing your application
 
-**Stub HTTP.** Requests go through Net::HTTP by default, so [WebMock](https://github.com/bblimke/webmock) works:
+**Use the in-memory ClickSend.** `require "clicksend/testing"` (not loaded by default) adds
+`Clicksend::Testing::FakeAPI`. It replaces only the HTTP exchange, so your code runs against a
+real `Clicksend::Client`: argument validation, errors, retry rules and models are the production
+code paths. Nothing is sent and no network is used.
+
+```ruby
+require "clicksend/testing"
+
+fake = Clicksend::Testing::FakeAPI.new
+client = fake.client # a real Clicksend::Client using the fake; retries don't wait
+
+client.sms.deliver(to: "+61411111111", body: "Your code is 481516", custom_string: "otp:42")
+fake.sent_messages.map { |m| [m.to, m.custom_string] } # => [["+61411111111", "otp:42"]]
+fake.requests.last.path                                # => "/v3/sms/send" (headers are never kept)
+
+fake.reject(to: "+61400000000", status: "INVALID_RECIPIENT") # deliver raises MessageRejected
+fake.add_receipt(for: fake.sent_messages.last, status_code: 201)
+fake.add_inbound(reply_to: fake.sent_messages.last, body: "STOP")
+fake.stub(:get, "/v3/sms/templates") { |request| {"data" => {"data" => []}} } # any other endpoint
+fake.reset!
+```
+
+In your app, pass the fake where you build the client, e.g.
+`Clicksend::Client.new(transport: fake)` in the test environment, or inject `fake.client`.
+
+**Simulate failures, including the ambiguous ones.** For outcomes where it matters you must say
+whether ClickSend processed the request before the failure, which is exactly the question your
+code has to cope with:
+
+```ruby
+fake.fail_next(:timeout, processed: true)   # accepted, response lost: deliver raises AmbiguousRequestError, one message recorded
+fake.fail_next(:timeout, processed: false)  # never processed: same error, nothing recorded
+fake.fail_next(:connection_reset, processed: true)
+fake.fail_next(status: 500, processed: false)
+fake.fail_next(:connection_refused)         # never sent: the gem retries it transparently
+fake.fail_next(status: 429, retry_after: 0) # rate limited: retried
+fake.fail_next(status: 401)
+fake.fail_next(:timeout, processed: true, path: "/v3/sms/send", times: 2) # only matching requests
+```
+
+The fake also serves receipts, replies (with ClickSend's mark-read rules), history and the
+account. It simplifies some things: history is immediately consistent, the balance never
+changes, and message parts are estimated. It can stand in as a development "dry run" transport
+too.
+
+**Stub HTTP.** Requests go through Net::HTTP by default, so [WebMock](https://github.com/bblimke/webmock) also works:
 
 ```ruby
 stub_request(:post, "https://rest.clicksend.com/v3/sms/send")
@@ -560,25 +605,14 @@ stub_request(:post, "https://rest.clicksend.com/v3/sms/send")
   }.to_json)
 ```
 
-**Use ClickSend's test numbers.** These include `+61411111111`, `+14055555555` and `+447777777777`;
-see the [full list](https://developers.clicksend.com/docs/testing). Nothing is sent or charged.
-A test number only returns `SUCCESS` if its country is enabled for your account. Otherwise
-ClickSend answers with the per-message status `COUNTRY_NOT_ENABLED`, which `deliver` raises as
-`MessageRejected`.
+**Use ClickSend's test numbers** for checks against the real API. These include `+61411111111`,
+`+14055555555` and `+447777777777`; see the [full list](https://developers.clicksend.com/docs/testing).
+Nothing is sent or charged, and no delivery receipt is generated. A test number only returns
+`SUCCESS` if its country is enabled for your account. Otherwise ClickSend answers with the
+per-message status `COUNTRY_NOT_ENABLED`, which `deliver` raises as `MessageRejected`.
 
-**Replace the transport.** For tests that shouldn't touch HTTP at all, pass any object that
-responds to `call(method, path, query:, body:, headers:)` and returns a
-`Clicksend::Transport::Response`:
-
-```ruby
-FakeTransport = Struct.new(:responses) do
-  def call(method, path, query:, body:, headers:) = responses.shift
-end
-
-client = Clicksend::Client.new(username: "u", api_key: "k", transport: FakeTransport.new([
-  Clicksend::Transport::Response.new(status: 200, headers: {}, body: '{"data":{"balance":"5.00"}}')
-]))
-```
+**Write your own transport** if you need to: any object that responds to
+`call(method, path, query:, body:, headers:)` and returns a `Clicksend::Transport::Response`.
 
 ## What is covered
 
@@ -590,6 +624,7 @@ client = Clicksend::Client.new(username: "u", api_key: "k", transport: FakeTrans
 | Message history | `GET /v3/sms/history` | `sms.history` |
 | Pushed receipts and replies (webhooks) | automation rules with the URL action | `Clicksend::Webhook` |
 | Account balance | `GET /v3/account` | `account.fetch` |
+| Testing without the network | | `Clicksend::Testing::FakeAPI` |
 | RCS | sent through `/v3/sms/send` once ClickSend enables it on your account | `sms.deliver` |
 | Everything else | [API reference](https://developers.clicksend.com/docs/) | `client.request`, `client.paginate` |
 
