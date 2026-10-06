@@ -1,0 +1,15 @@
+{
+  "originalsenderid": "+61411111111",
+  "body": "trigger reply",
+  "message": "trigger reply",
+  "sms": "+447777777777",
+  "from": "+447777777777",
+  "to": "+61411111111",
+  "timestamp": 1759730500,
+  "message_id": "5F0E1D2C-3B4A-4596-8778-695A4B3C2D1E",
+  "original_message_id": "4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B",
+  "original_body": "TESTING TRIGGER",
+  "user_id": 100001,
+  "subaccount_id": 100002,
+  "custom_string": ""
+}

@@ -13,7 +13,9 @@ Sources:
 - [SMS error codes](https://help.clicksend.com/en/articles/42318-sms-error-codes)
 - Superseded but still informative: the [legacy HTTP v2 docs](https://developers.clicksend.com/docs/http/v2/)
   and the [archived REST v3 docs](https://web.archive.org/web/20220502204655/https://developers.clicksend.com/docs/rest/v3/)
-  (2022), the only sources that list the fields ClickSend pushes to webhook URLs
+  (2022), and help articles that disappeared when ClickSend moved its help centre (around mid-2025,
+  judging by the Wayback Machine, which kept them). Those, and ClickSend's own integrations, are the only sources that list
+  the fields ClickSend pushes to webhook URLs; see `research/1.2-webhooks.md` in the repository
 
 ## Behaviour taken from the documentation
 
@@ -41,8 +43,8 @@ Sources:
 | Cancel one scheduled SMS | `PUT /v3/sms/{message_id}/cancel`, no body; 200 example `response_msg: "Scheduled sms message has been cancelled."`, `data` "deprecated and will return null" (archived 2022: `data: []`, message naming the ID). Answers for an unknown, sent or already-cancelled ID, and idempotency, are **undocumented** | `sms.cancel`, not idempotent: never retried after a timeout or 5xx |
 | Cancel all scheduled SMS | `PUT /v3/sms/cancel-all`; optional body `custom_string` limits it to messages with that value (match semantics undocumented); without it, every scheduled SMS is cancelled. Returns `data.count` | Deliberately not wrapped |
 | Price quote | `POST /v3/sms/price`: "calculate the price of sending messages". The only statement about effects is in the `sms` schema's `date`: it may be empty "in price-calculation responses where no message has actually been sent yet". The example returns a `message_id` | Not wrapped; `client.request` treats it as non-idempotent |
-| Webhooks (push) | Automation rules with the `URL` action. Inbound rules: `webhook_type` `post` (form, default), `get` or `json` (format unspecified). Receipts: form-encoded POST according to the archived v3 docs (help 42270 covers inbound rules only). **No payload schema** in the current docs; the archived docs list the fields, matching the poll schemas plus `user_id` and (receipts) `status`. Archived: a non-200 is retried every 10 minutes, 10 times | `Clicksend::Webhook` parses into `SMS::Receipt` / `SMS::InboundMessage` |
-| Webhook authentication | **None documented.** No signature, HMAC or shared secret in any current, archived or help source. Current docs list no source IP addresses; archived help pages (around 2019–2021, no longer published) listed six and said pushes come from a fixed pool | No verification method and no IP allowlisting; README prescribes a secret URL and confirming via the API |
+| Webhooks (push) | Automation rules with the `URL` action. Inbound rules: `webhook_type` `post` (form, default), `get` or `json` (format unspecified; ClickSend's n8n trigger shows a flat JSON object with integer `timestamp`/`user_id`). Receipts: form-encoded POST according to archived help ("the only forwarding format we support is x-www-form-urlencoded"). **No payload schema** in the current docs; archived docs and help list the fields: the poll schemas' names plus `user_id`, `status` (receipts) and legacy duplicates (`message`, `sms`, `originalsenderid`, `originalmessage`, `originalmessageid`, `customstring`, `messageid`). Retries: archived sources disagree (every 10 minutes ×10 with a 30 s timeout, or backoff over hours with a 15 s timeout); nothing current | `Clicksend::Webhook` parses into `SMS::Receipt` / `SMS::InboundMessage`; the extra keys stay in `#raw` |
+| Webhook authentication | **None in the current docs**: no signature, HMAC or shared secret. Archived help (no longer published) suggested HTTPS, a URL token, checking `user_id`, and an allowlist of six source IPs last updated around 2019 | No verification method; README prescribes a secret URL and confirming via the API, and warns against the stale IP list |
 | Request ID | None documented; no spec declares any response header | `Error#request` describes the call instead |
 
 ## Ambiguities and inconsistencies
@@ -162,8 +164,12 @@ test accounts:
 - [ ] Whether mark-read accepts an empty `{}` body. Deliberately not tested, because it would
       mark every unread item read (documented). The gem sends `{}` when `before:` is omitted; the
       request schema allows it.
-- [ ] A real webhook push: its content type, field names and types. Field names come from the
-      poll schemas and the archived docs
+- [ ] A real webhook push: its content type, field names and types (inbound `post`, `get` and
+      `json`, and a receipt), its headers, and how `null` is encoded. Field names come from the poll
+      schemas, archived docs and ClickSend's integrations. `script/webhook_capture.rb` and the
+      capture protocol in `research/1.2-webhooks.md` exist for this
+- [ ] Whether `GET /v3/sms/receipts/{message_id}` finds a receipt on an account with only URL rules
+- [ ] ClickSend's current retry schedule and timeout for pushes
 - [ ] How soon a sent message appears in history, and whether `date_from`/`date_to` are inclusive
 - [ ] Where and when `THROTTLED` is returned
 - [ ] What `PUT /v3/sms/{message_id}/cancel` answers for a second cancel, an already-sent message

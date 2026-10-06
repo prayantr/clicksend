@@ -40,3 +40,7 @@ archived docs list. Every value is a String, as a form-encoded POST arrives in R
 `error_code`/`error_text` assume a null is sent as an empty field (undocumented). Phone numbers
 are ClickSend test numbers and the IDs are made up. `spec/contract/webhook_contract_spec.rb`
 checks the field names against ClickSend's current schemas.
+
+`webhooks/` holds replay fixtures for more push shapes (archived, first-party and documented
+sources, and real captures once there are any), each listed in `webhooks/manifest.yml`; see
+`webhooks/README.md`.

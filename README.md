@@ -337,38 +337,68 @@ end
 works out which of the two it was given. Pass the body parameters, not the route ones, so your
 secret isn't kept in `#raw`.
 
-> **Experimental.** ClickSend doesn't document the push format, and no real push has been captured
-> for this gem yet: the field names come from ClickSend's polling API and archived docs. The
-> `Clicksend::Webhook` API may change in a minor release.
+> **Experimental.** ClickSend's current docs don't define the push format, and no real push has
+> been captured for this gem yet. The field names come from ClickSend's polling API, which an
+> archived ClickSend help article and ClickSend's own n8n and Power Automate integrations agree
+> with. The `Clicksend::Webhook` API may change in a minor release.
 
-**ClickSend documents no way to authenticate webhooks.** There is no documented signature, shared
-secret or HMAC. ClickSend's current documentation lists no source IP addresses; archived help pages
-(around 2019–2021, no longer published) listed some and said pushes come from a fixed pool. That
-list can't be checked against today's infrastructure, so this gem doesn't support or recommend IP
-allowlisting. Treat anyone who learns the URL as able to send a fake receipt. This gem therefore
-offers no "verify" method. Instead:
-- put an unguessable secret in the URL, compare it in constant time, and use HTTPS. A secret in the
-  path appears in access logs (Rails logs the path, and proxies and APM tools often keep it), so
-  restrict who can read them, and filter `body`, `from` and `to` with `filter_parameter_logging`;
+**ClickSend's current docs describe no way to authenticate webhooks**: no signature, HMAC or shared
+secret. An archived help article listed six source IP addresses, but it is no longer published and
+was last updated years ago, so don't build an allowlist on it. Treat anyone who learns the URL as
+able to send a fake receipt. This gem therefore offers no "verify" method. Instead:
+- put an unguessable secret in the URL, compare it in constant time, and use HTTPS (archived
+  ClickSend help says the certificate chain must be valid). A secret in the path appears in access
+  logs: Rails' request log shows the path as is (Rails 8.1 filters only query parameters, such as
+  `?token=`), and proxies and APM tools often keep the full URL. Restrict who can read them, and
+  add the personal fields (`body`, `message`, `from`, `to`, `sms`, `originalsenderid`,
+  `original_body`, `originalmessage`) to `filter_parameters`;
+- to rotate the secret, accept the old and the new one until every rule uses the new URL;
 - treat a push as a hint. A receipt can probably be confirmed with `client.sms.receipt(message_id)`
   (not yet verified for an account with only URL rules), at one API call per check. An
   inbound message can't be fetched by its ID through any wrapped or verified endpoint; the closest
   check is `client.sms.history(from: number)`. Be careful acting on unconfirmed replies such as
   "STOP";
-- handle pushes idempotently. Several rules can match, and (according to ClickSend's archived docs)
-  a non-200 answer is retried every 10 minutes, up to 10 times. Key inbound messages on
-  `message_id`. Key receipts on `message_id` **and** `status_code`: ClickSend's gateway codes include
-  states that aren't final (200, 300), so one message can legitimately produce more than one
-  receipt, and deduplicating on `message_id` alone could discard the final 201 or 301. When
-  receipts for a message disagree, prefer a final code;
-- answer 200 quickly and do the work in a job.
+- handle pushes idempotently. Several rules can match (up to 10 per inbound message, and
+  integrations such as Zapier create their own rules), and a non-200 or slow answer is retried:
+  ClickSend's archived pages say either every 10 minutes up to 10 times, or with backoff over hours.
+  An inbound `message_id` is unique. A sent message may get more than one receipt (the pending
+  codes 200 and 300 can change), so key receipts on `message_id` and `status_code`, and don't let a
+  pending receipt overwrite a final one (`delivered?` or `failed?`);
+- answer 200 quickly and do the work in a job. If the job parses or confirms the push, add
+  `discard_on Clicksend::Webhook::InvalidPayload` below any `retry_on Clicksend::Error`: a payload
+  that can't be parsed won't parse on a retry.
+
+```ruby
+# Two secrets during a rotation; ActiveSupport's secure_compare also handles different lengths.
+def valid_secret?(given)
+  secrets = Rails.application.credentials.clicksend_webhook_secrets # e.g. [new, old]
+  secrets.any? { |secret| ActiveSupport::SecurityUtils.secure_compare(given.to_s, secret) }
+end
+
+# Deduplicating receipts in a job: one row per message, final statuses win.
+# (Unique index on sms_deliveries.message_id.)
+def record(receipt)
+  delivery = SmsDelivery.create_or_find_by!(message_id: receipt.message_id)
+  return if delivery.final? && receipt.pending? # final?: your own check for status_code 201 or 301
+
+  delivery.update!(status_code: receipt.status_code, reported_at: receipt.reported_at)
+end
+```
 
 Inbound rules post form fields by default, or use a query string (`webhook_type: "get"`) or JSON
 (`"json"`); for JSON, pass `JSON.parse(request.raw_post)` or Rails' parsed body parameters. Receipt
-pushes are form-encoded according to ClickSend's archived docs. The parsers use the field names of
-the polling API, which match the archived push documentation, and reject payloads with too many
-fields, oversized or non-UTF-8 values, or nested values in the fields they read. Pass a plain
-Hash of the body parameters rather than Rails' `params`, which also holds route parameters.
+pushes are form-encoded according to ClickSend's archived help. According to the same sources,
+pushes also carry `user_id` and legacy duplicates (`message`, `sms`, `originalsenderid`,
+`messageid`, `customstring`, ...), which are kept in `#raw`, and a JSON push may send `timestamp`
+and `user_id` as numbers; either form is accepted. The parsers reject payloads with too many fields, oversized
+or non-UTF-8 values, or nested values in the fields they read. Pass a plain Hash of the body
+parameters rather than Rails' `params`, which also holds route parameters.
+
+Some things a receiver should expect, according to ClickSend's archived help: the same receipt
+format is used for voice, email and fax receipts (check `receipt.message_type` if those rules share
+your URL), and an inbound MMS arrives through the SMS inbound rules with its attachment as a link
+that expires after 7 days. To see a push without sending an SMS, the dashboard's **Add Test Reply**
+button on a rule posts an example to its URL.
 
 ## Message history
 

@@ -10,27 +10,33 @@ module Clicksend
   #
   # ClickSend pushes through automation rules with the +URL+ action. Inbound
   # rules POST a form (the default), GET with a query string, or POST JSON, by
-  # the rule's +webhook_type+; ClickSend does not document the JSON field
-  # names, and this assumes they are the same. Receipt pushes are form-encoded
-  # according to the archived v3 docs. The field names come from the poll
-  # schemas (+sms_receipt+, +inbound_sms+), which match the archived push
-  # docs. According to those, pushes also carry +user_id+ and, on receipts,
-  # +status+ ("Delivered"/"Undelivered"); those stay in +raw+.
+  # the rule's +webhook_type+. Receipt rules have no +webhook_type+; archived
+  # ClickSend help says pushes are form-encoded. The field names are those of
+  # the poll schemas (+sms_receipt+, +inbound_sms+), which an archived
+  # ClickSend help article and ClickSend's own n8n and Power Automate
+  # integrations also use. Those sources show pushes also carry +user_id+,
+  # +status+ ("Delivered"/"Undelivered", receipts) and legacy duplicates such
+  # as +message+, +sms+, +originalsenderid+, +messageid+ and +customstring+;
+  # these stay in +raw+. A JSON push may send numbers (+timestamp+,
+  # +user_id+) as JSON integers; both forms are accepted.
   #
-  # ClickSend documents no signing or authentication for pushes: no HMAC,
-  # signature or secret, and no current list of source IP addresses (archived
-  # help pages once listed some; they can't be checked today, so don't
-  # allowlist by IP). Treat anyone who knows the URL as able to forge one, so:
-  # - put an unguessable secret in the URL path and compare it in constant time
+  # ClickSend's current docs describe no signing or authentication for
+  # pushes: no HMAC, signature or shared secret. (An archived help article
+  # listed six source IP addresses; it is no longer published, so do not rely
+  # on it.) Treat anyone who knows the URL as able to forge one, so:
+  # - put an unguessable secret in the URL and compare it in constant time
   #   (it will appear in access logs: restrict who reads them);
-  # - use HTTPS;
+  # - use HTTPS (archived help: a valid certificate chain is required);
   # - treat the event as a hint; a receipt can probably be confirmed with
   #   <tt>client.sms.receipt(event.message_id)</tt> (not yet verified for
   #   accounts with only URL rules);
-  # - process idempotently: several matching rules may each push, and (per the
-  #   archived docs) a non-200 is retried every 10 minutes, 10 times. Key inbound
-  #   messages on +message_id+, and receipts on +message_id+ and +status_code+:
-  #   non-final codes (200, 300) mean one message can get several receipts;
+  # - process idempotently: several matching rules may each push, and a
+  #   non-200 or slow answer is retried (archived pages disagree on the
+  #   schedule: every 10 minutes 10 times, or backing off over hours). An
+  #   inbound message_id is unique, but one sent message may get more than
+  #   one receipt (the pending codes 200 and 300 "can update at any time"), so
+  #   key receipts on message_id and status_code, and never let a pending
+  #   status replace a final one;
   # - answer 200 quickly and do the work in a job.
   #
   # Prefer one URL per rule type with #parse_receipt / #parse_inbound; #parse

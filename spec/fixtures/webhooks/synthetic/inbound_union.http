@@ -1,0 +1,4 @@
+POST /clicksend/:secret/inbound HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+timestamp=1759730500&to=%2B61411111111&from=%2B447777777777&body=Yes+please%2C+Thursday+works&original_body=Can+we+confirm+your+appointment+on+Thursday%3F+Reply+YES+or+NO&original_message_id=4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B&custom_string=order-1042&user_id=100001&subaccount_id=100002&message_id=9E8D7C6B-5A49-4382-9170-6F5E4D3C2B1A&originalsenderid=%2B61411111111&message=Yes+please%2C+Thursday+works&sms=%2B447777777777&originalmessageid=4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B&originalmessage=Can+we+confirm+your+appointment+on+Thursday%3F+Reply+YES+or+NO&customstring=order-1042

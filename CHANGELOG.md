@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Draft for 1.2.0 (spike branch `spike/1.2-api`; see `research/1.2-api-cancel-quote-history.md`).
+Planned as 1.2.0. Additive.
 
 ### Added
 
@@ -23,6 +23,26 @@ Draft for 1.2.0 (spike branch `spike/1.2-api`; see `research/1.2-api-cancel-quot
   (`fake.cancelled_messages`) and raises `StubError` for every cancel ClickSend doesn't document,
   so tests must stub that answer. `fake.stub_history(*messages, status: "Sent")` states what
   history shows; the fake still serves no history by itself.
+
+### Changed
+
+- **Webhook documentation corrected from new evidence** (`Clicksend::Webhook` is still
+  experimental; no behaviour changed). Archived ClickSend help articles and ClickSend's own n8n
+  and Power Automate integrations list the pushed fields, including legacy duplicates (`message`,
+  `sms`, `originalsenderid`, `messageid`, `customstring`, ...) that stay in `#raw`. The README and
+  API notes no longer say that no source ever listed IP addresses: an archived article did, but it
+  is stale and unpublished, so the gem still offers no allowlist. Archived sources disagree on the
+  retry schedule, which is now said. Receipts must be deduplicated on `message_id` and
+  `status_code`, not `message_id` alone, because a message may get more than one receipt. New
+  receiver advice: secret rotation, `discard_on Clicksend::Webhook::InvalidPayload`, Rails'
+  log filtering, voice/email/fax receipts sharing the format, inbound MMS links, and the
+  dashboard's "Add Test Reply".
+
+### Development
+
+- Webhook replay fixtures (`spec/fixtures/webhooks`, one per published push shape, replayed
+  through Rack's request parsing) and `script/webhook_capture.rb`, which captures real pushes
+  locally and redacts them into fixtures. `rack` is a new development dependency.
 
 ## [1.1.0] - 2026-10-06
 

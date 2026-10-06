@@ -1,0 +1,11 @@
+{
+  "timestamp_send": 1759730500,
+  "from": "+447777777777",
+  "body": "This is a test incoming SMS.",
+  "original_body": "This is the original message.",
+  "original_message_id": "4C0F2D1E-7A3B-4E5F-9A8B-0C1D2E3F4A5B",
+  "to": "+61411111111",
+  "custom_string": "Test custom string ",
+  "message_id": "7A6B5C4D-3E2F-4011-8223-344556677889",
+  "_keyword": "this"
+}
