@@ -18,7 +18,13 @@ module Clicksend
     DEFAULT_MAX_RETRIES = 2
     LOCAL_HOSTS = %w[localhost 127.0.0.1 ::1 [::1]].freeze
 
-    attr_reader :username, :base_url, :timeout, :open_timeout, :max_retries
+    attr_reader :username, :base_url, :timeout, :open_timeout
+
+    # @return [#delay, #max_retries] see Clicksend::RetryPolicy
+    attr_reader :retry_policy
+
+    # @return [#instrument] see Clicksend::Instrumentation
+    attr_reader :instrumenter
 
     # @return [Clicksend::Resources::Account]
     attr_reader :account
@@ -33,21 +39,29 @@ module Clicksend
     # @param timeout [Numeric] seconds to wait for a response (read timeout)
     # @param open_timeout [Numeric] seconds to wait for the TCP/TLS connection
     # @param max_retries [Integer] retries for failures that are safe to retry
-    #   (see Clicksend::RetryPolicy); 0 disables retries
+    #   (see Clicksend::RetryPolicy); 0 disables retries. Default 2. A shortcut
+    #   for +retry_policy: RetryPolicy.new(max_retries: n)+; pass one or the other.
+    # @param retry_policy [#delay, #max_retries] backoff timing and retry budget
+    #   (see Clicksend::RetryPolicy). Which failures are retried at all is not
+    #   configurable.
     # @param logger [#info, #warn, nil] receives one line per HTTP attempt;
     #   never request/response bodies, query strings or credentials
+    # @param instrumenter [#instrument, nil] e.g. ActiveSupport::Notifications;
+    #   see Clicksend::Instrumentation for the events and their payloads
     # @param adapter [Symbol, Array, nil] Faraday adapter (default Net::HTTP)
     # @param transport [#call, nil] replaces the HTTP layer entirely (see
-    #   Clicksend::Transport); +timeout+, +open_timeout+ and +adapter+ are then
-    #   the transport's responsibility
+    #   Clicksend::Transport and Clicksend::Testing::FakeAPI); +timeout+,
+    #   +open_timeout+ and +adapter+ are then the transport's responsibility
     def initialize(
       username: ENV.fetch("CLICKSEND_USERNAME", nil),
       api_key: ENV.fetch("CLICKSEND_API_KEY", nil),
       base_url: DEFAULT_BASE_URL,
       timeout: DEFAULT_TIMEOUT,
       open_timeout: DEFAULT_OPEN_TIMEOUT,
-      max_retries: DEFAULT_MAX_RETRIES,
+      max_retries: nil,
+      retry_policy: nil,
       logger: nil,
+      instrumenter: nil,
       adapter: nil,
       transport: nil
     )
@@ -56,30 +70,37 @@ module Clicksend
       @base_url = normalize_base_url!(base_url)
       @timeout = positive_number!(timeout, "timeout")
       @open_timeout = positive_number!(open_timeout, "open_timeout")
-      unless max_retries.is_a?(Integer) && max_retries >= 0
-        raise ConfigurationError, "max_retries must be a non-negative Integer"
+      @retry_policy = build_retry_policy(max_retries, retry_policy)
+      @instrumenter = instrumenter || Instrumentation::Null
+      unless @instrumenter.respond_to?(:instrument)
+        raise ConfigurationError, "instrumenter must respond to #instrument(name, payload) { ... }"
       end
-      @max_retries = max_retries
 
       @settings = {
         username: @username, api_key: api_key, base_url: @base_url, timeout: @timeout,
-        open_timeout: @open_timeout, max_retries: @max_retries, logger: logger,
-        adapter: adapter, transport: transport
+        open_timeout: @open_timeout, max_retries: max_retries, retry_policy: retry_policy, logger: logger,
+        instrumenter: instrumenter, adapter: adapter, transport: transport
       }.freeze
 
       @connection = Connection.new(
         transport: transport || Transport::Faraday.new(base_url: @base_url, timeout: @timeout, open_timeout: @open_timeout, adapter: adapter),
-        retry_policy: RetryPolicy.new(max_retries: @max_retries),
+        retry_policy: @retry_policy,
         headers: {
           "Authorization" => "Basic #{["#{@username}:#{api_key}"].pack("m0")}",
           "Accept" => "application/json",
           "User-Agent" => "clicksend-ruby/#{VERSION} ruby/#{RUBY_VERSION}"
         },
-        logger: logger
+        logger: logger,
+        instrumenter: @instrumenter
       )
       @account = Resources::Account.new(self)
       @sms = Resources::SMS.new(self)
       freeze
+    end
+
+    # Retries allowed after a failed attempt (from the retry policy).
+    def max_retries
+      retry_policy.max_retries
     end
 
     # Calls any ClickSend v3 endpoint, wrapped by this gem or not.
@@ -98,21 +119,27 @@ module Clicksend
     #   it may already have reached ClickSend (timeouts, 5xx). Defaults to true
     #   for GET only: ClickSend uses POST/PUT for operations such as sending
     #   messages and buying credit, so they are not assumed to be repeatable.
+    #   A failure of a non-idempotent request that may have been processed is
+    #   a Clicksend::AmbiguousRequestError.
+    # @param operation [String, nil] a label for logs and instrumentation,
+    #   e.g. "templates.create"; wrapped methods use names like "sms.deliver"
     # @return [Clicksend::Response]
     # @raise [Clicksend::Error] see the error hierarchy in errors.rb
-    def request(method, path, query: nil, body: nil, idempotent: nil)
+    def request(method, path, query: nil, body: nil, idempotent: nil, operation: nil)
       method = method.to_s.downcase.to_sym
       unless Connection::HTTP_METHODS.include?(method)
         raise ArgumentError, "unsupported HTTP method #{method.inspect}; use one of #{Connection::HTTP_METHODS.join(", ")}"
       end
       validate_path!(path)
       raise ArgumentError, "query must be a Hash" unless query.nil? || query.is_a?(Hash)
+      raise ArgumentError, "operation must be a String" unless operation.nil? || operation.is_a?(String)
 
       @connection.request(
         method, path,
         query: query&.compact,
         body: body,
-        idempotent: idempotent.nil? ? method == :get : idempotent
+        idempotent: idempotent.nil? ? method == :get : idempotent == true,
+        operation: operation
       )
     end
 
@@ -122,17 +149,21 @@ module Clicksend
     #   page.auto_paging_each { |message| ... }
     #
     # @return [Clicksend::Page]
-    def paginate(path, query: {}, page: nil, limit: nil)
-      Page.fetch(self, path, query: query, page: page, limit: limit)
+    def paginate(path, query: {}, page: nil, limit: nil, operation: nil)
+      Page.fetch(self, path, query: query, page: page, limit: limit, operation: operation)
     end
 
     # Returns a new client with some settings changed, e.g. a subaccount's
     # credentials or a shorter timeout for a latency-sensitive code path.
+    # Overriding +max_retries+ replaces the retry policy, and vice versa.
     def with(**overrides)
       unknown = overrides.keys - @settings.keys
       raise ArgumentError, "unknown setting(s): #{unknown.join(", ")}" unless unknown.empty?
 
-      self.class.new(**@settings, **overrides)
+      settings = @settings
+      settings = settings.merge(retry_policy: nil) if overrides.key?(:max_retries)
+      settings = settings.merge(max_retries: nil) if overrides.key?(:retry_policy)
+      self.class.new(**settings, **overrides)
     end
 
     def inspect
@@ -148,6 +179,16 @@ module Clicksend
       return value.strip if value.is_a?(String) && !value.strip.empty?
 
       raise ConfigurationError, "Missing ClickSend #{name}: pass #{name}: or set #{env_name}"
+    end
+
+    def build_retry_policy(max_retries, retry_policy)
+      unless max_retries.nil? || retry_policy.nil?
+        raise ConfigurationError, "pass max_retries: or retry_policy:, not both"
+      end
+      return RetryPolicy.new(max_retries: max_retries.nil? ? DEFAULT_MAX_RETRIES : max_retries) if retry_policy.nil?
+      return retry_policy if retry_policy.respond_to?(:delay) && retry_policy.respond_to?(:max_retries)
+
+      raise ConfigurationError, "retry_policy must respond to #delay(error:, attempt:) and #max_retries"
     end
 
     def positive_number!(value, name)

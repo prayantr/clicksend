@@ -61,7 +61,7 @@ RSpec.describe Clicksend::Resources::Account do
     stub_api(:get, "/v3/account").to_return(json_response(
       {"http_code" => 401, "response_code" => "UNAUTHORIZED", "response_msg" => "Authorization failed.", "data" => nil}, status: 401
     ))
-    expect { client.account.fetch }.to raise_error(Clicksend::AuthenticationError, "HTTP 401: UNAUTHORIZED - Authorization failed.")
+    expect { client.account.fetch }.to raise_error(Clicksend::AuthenticationError, "HTTP 401: UNAUTHORIZED - Authorization failed. (GET /v3/account)")
   end
 
   it "raises MalformedResponseError when data is not an object" do

@@ -78,7 +78,7 @@ RSpec.describe Clicksend::Connection do
     it "exposes ClickSend's envelope on the error" do
       body = {"http_code" => 401, "response_code" => "UNAUTHORIZED", "response_msg" => "Authorization failed.", "data" => nil}
       expect { connection(FakeTransport.json(401, body, headers: {"x-ratelimit-limit" => "20"})).request(:get, "/v3/account") }
-        .to raise_error(Clicksend::AuthenticationError, "HTTP 401: UNAUTHORIZED - Authorization failed.") { |e|
+        .to raise_error(Clicksend::AuthenticationError, "HTTP 401: UNAUTHORIZED - Authorization failed. (GET /v3/account)") { |e|
           expect(e.http_status).to eq(401)
           expect(e.response_code).to eq("UNAUTHORIZED")
           expect(e.response_msg).to eq("Authorization failed.")
@@ -89,7 +89,7 @@ RSpec.describe Clicksend::Connection do
 
     it "keeps a non-JSON error body (e.g. a proxy's HTML page) as a String" do
       expect { connection(FakeTransport.json(502, "<html>Bad Gateway</html>")).request(:get, "/v3/x") }
-        .to raise_error(Clicksend::ServerError, "HTTP 502") { |e| expect(e.body).to eq("<html>Bad Gateway</html>") }
+        .to raise_error(Clicksend::ServerError, "HTTP 502 (GET /v3/x)") { |e| expect(e.body).to eq("<html>Bad Gateway</html>") }
     end
 
     it "handles an empty error body" do
@@ -99,7 +99,7 @@ RSpec.describe Clicksend::Connection do
 
     it "ignores envelope fields with unexpected types" do
       expect { connection(FakeTransport.json(400, {"response_code" => 42})).request(:get, "/v3/x") }
-        .to raise_error(Clicksend::BadRequestError, "HTTP 400") { |e| expect(e.response_code).to be_nil }
+        .to raise_error(Clicksend::BadRequestError, "HTTP 400 (GET /v3/x)") { |e| expect(e.response_code).to be_nil }
     end
 
     it "treats a 2xx response whose envelope reports an error http_code as that error" do

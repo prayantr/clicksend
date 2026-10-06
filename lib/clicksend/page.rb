@@ -23,7 +23,7 @@ module Clicksend
     # @api private Use Client#paginate or a resource method.
     #
     # @yieldparam item [Hash] a raw item, to be converted into a model
-    def self.fetch(client, path, query: {}, page: nil, limit: nil, &build_item)
+    def self.fetch(client, path, query: {}, page: nil, limit: nil, operation: nil, &build_item)
       if page && !(page.is_a?(Integer) && page.positive?)
         raise ArgumentError, "page must be a positive Integer"
       end
@@ -32,9 +32,12 @@ module Clicksend
       end
 
       query = query.transform_keys(&:to_s)
-      response = client.request(:get, path, query: query.merge("page" => page, "limit" => limit).compact)
-      fetch_page = ->(number) { fetch(client, path, query: query, page: number, limit: limit, &build_item) }
+      response = client.request(:get, path, query: query.merge("page" => page, "limit" => limit).compact, operation: operation)
+      fetch_page = ->(number) { fetch(client, path, query: query, page: number, limit: limit, operation: operation, &build_item) }
       from_response(response, fetch_page, &build_item)
+    rescue MalformedResponseError => e
+      e.request ||= response&.request
+      raise
     end
 
     def self.from_response(response, fetch_page, &build_item)

@@ -9,7 +9,13 @@ module Clicksend
   #   {"http_code": 200, "response_code": "SUCCESS", "response_msg": "...", "data": {...}}
   #
   # The envelope readers return nil when the body doesn't follow that shape.
-  Response = Data.define(:http_status, :headers, :body) do
+  # +request+ (a Clicksend::RequestInfo) says which call this was and how many
+  # attempts it took.
+  Response = Data.define(:http_status, :headers, :body, :request) do
+    def initialize(http_status:, headers:, body:, request: nil)
+      super
+    end
+
     # The envelope's +data+ member.
     def data
       envelope("data")
@@ -23,6 +29,12 @@ module Clicksend
     # The envelope's human-readable +response_msg+.
     def response_msg
       envelope("response_msg")
+    end
+
+    # Rate-limit headers sent with this response, if any. See Clicksend::RateLimit.
+    # @return [Clicksend::RateLimit, nil]
+    def rate_limit
+      RateLimit.from_headers(headers)
     end
 
     def inspect

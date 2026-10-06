@@ -32,6 +32,15 @@ module Clicksend
       end
     end
 
+    # An identifier or code that ClickSend sends as either a String or an
+    # Integer (e.g. list_id, history error_code) -> String
+    def code(value)
+      case value
+      when String then value
+      when Integer then value.to_s
+      end
+    end
+
     # Unix timestamp (Integer or numeric String) -> UTC Time
     def time(value)
       integer(value)&.then { |seconds| Time.at(seconds).utc }

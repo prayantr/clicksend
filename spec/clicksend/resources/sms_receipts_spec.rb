@@ -87,11 +87,18 @@ RSpec.describe Clicksend::Resources::SMS, "receipts and replies" do
       expect(stub).to have_been_requested
     end
 
-    it "is retried after a 5xx because it is idempotent" do
+    it "is retried after a 5xx when it has a cutoff, because repeating it changes nothing" do
+      allow(Kernel).to receive(:sleep)
+      stub = stub_api(:put, "/v3/sms/receipts-read", body: {date_before: 1_722_565_660}).to_return({status: 502, body: ""}, json_response(fixture("sms_receipts_read")))
+      client.sms.mark_receipts_read(before: 1_722_565_660)
+      expect(stub).to have_been_requested.twice
+    end
+
+    it "is not retried without a cutoff: a second 'mark all' could hide receipts that arrived in between" do
       allow(Kernel).to receive(:sleep)
       stub = stub_api(:put, "/v3/sms/receipts-read").to_return({status: 502, body: ""}, json_response(fixture("sms_receipts_read")))
-      client.sms.mark_receipts_read
-      expect(stub).to have_been_requested.twice
+      expect { client.sms.mark_receipts_read }.to raise_error(Clicksend::ServerError) { |e| expect(e).to be_ambiguous }
+      expect(stub).to have_been_requested.once
     end
   end
 

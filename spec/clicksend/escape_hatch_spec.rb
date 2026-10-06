@@ -136,7 +136,7 @@ RSpec.describe "Client#request escape hatch" do
     end
 
     it "offers no per-request way to change the host or headers" do
-      expect(Clicksend::Client.instance_method(:request).parameters.map(&:last)).to eq(%i[method path query body idempotent])
+      expect(Clicksend::Client.instance_method(:request).parameters.map(&:last)).to eq(%i[method path query body idempotent operation])
     end
   end
 end

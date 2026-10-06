@@ -4,8 +4,12 @@ require "json"
 
 module Clicksend
   # Runs one logical API call over a transport: encodes the JSON body, parses
-  # the response envelope, maps failures to Clicksend errors, retries when the
-  # retry policy says it is safe, and logs a one-line summary per attempt.
+  # the response envelope, maps failures to Clicksend errors, retries when it
+  # is safe, and reports each call to the logger and instrumenter.
+  #
+  # Whether a failure may be retried at all is decided here, from what is
+  # known about the failure, and cannot be changed by configuration. The retry
+  # policy only chooses the delay and enforces the retry budget.
   #
   # @api private Use Client#request instead.
   class Connection
@@ -19,38 +23,39 @@ module Clicksend
       429 => RateLimitError
     }.freeze
 
+    # How much is known about a failed attempt, which decides retries and
+    # ambiguity:
+    #
+    # [:rate_limited] HTTP 429: not processed (ClickSend's documentation)
+    # [:not_sent]     failed before the request was written
+    # [:unknown]      may have been processed: read timeout, reset, TLS, 5xx
+    # [:undocumented] an error inside a 2xx body, or an unreadable 2xx body
+    # [:rejected]     any other 4xx: ClickSend refused the request
+    RETRY_ALWAYS = %i[rate_limited not_sent].freeze
+    MAY_HAVE_BEEN_PROCESSED = %i[unknown undocumented].freeze
+
     # @param headers [Hash] sent with every request (authentication, User-Agent)
-    def initialize(transport:, retry_policy:, headers: {}, logger: nil)
+    # @param instrumenter [#instrument] see Clicksend::Instrumentation
+    def initialize(transport:, retry_policy:, headers: {}, logger: nil, instrumenter: Instrumentation::Null)
       @transport = transport
       @retry_policy = retry_policy
       @headers = headers.dup.freeze
       @logger = logger
+      @instrumenter = instrumenter
     end
 
     # @return [Clicksend::Response]
     # @raise [Clicksend::Error]
-    def request(method, path, query: nil, body: nil, idempotent: false)
+    def request(method, path, query: nil, body: nil, idempotent: false, operation: nil)
       headers = @headers
       unless body.nil?
         headers = headers.merge("Content-Type" => "application/json")
         body = JSON.generate(body)
       end
 
-      attempt = 0
-      loop do
-        outcome, retry_allowed = attempt_request(method, path, query, body, headers)
-        return outcome if outcome.is_a?(Response)
-
-        error = outcome
-        delay = retry_allowed && @retry_policy.delay(error: error, attempt: attempt, idempotent: idempotent)
-        raise error unless delay
-
-        attempt += 1
-        log(:warn) do
-          "#{method.upcase} #{path} failed (#{error.class.name}), retrying in #{format("%.2f", delay)}s " \
-            "(retry #{attempt} of #{@retry_policy.max_retries})"
-        end
-        Kernel.sleep(delay)
+      call = {method: method, path: path, operation: operation, idempotent: idempotent}
+      @instrumenter.instrument("request.clicksend", call.dup) do |payload|
+        run(call, query, body, headers, payload || {})
       end
     end
 
@@ -61,28 +66,80 @@ module Clicksend
 
     private
 
-    # One HTTP attempt. Returns a Response, or [error, retry_allowed]. Errors
-    # are returned rather than raised so the retry decision can use facts
-    # about this attempt without storing state on the (shared) Connection.
-    def attempt_request(method, path, query, body, headers)
-      started = monotonic_now
-      raw = @transport.call(method, path, query: query, body: body, headers: headers)
-      log(:info) { "#{method.upcase} #{path} -> #{raw.status} (#{elapsed_ms(started)}ms)" }
-      interpret(raw)
-    rescue ConnectionError => e
-      [e, true]
+    def run(call, query, body, headers, payload)
+      attempt = 0
+      loop do
+        info = RequestInfo.new(**call, attempts: attempt + 1)
+        outcome, kind = attempt_request(call, query, body, headers)
+        if outcome.is_a?(Response)
+          payload.update(attempts: info.attempts, http_status: outcome.http_status, response_code: outcome.response_code, ambiguous: false)
+          return outcome.with(request: info)
+        end
+
+        error = outcome
+        error.request = info
+        delay = retry_delay(error, kind, attempt, call[:idempotent])
+        unless delay
+          error.extend(AmbiguousRequestError) if !call[:idempotent] && MAY_HAVE_BEEN_PROCESSED.include?(kind)
+          payload.update(attempts: info.attempts, http_status: error_status(error), response_code: error_code(error), ambiguous: error.ambiguous?)
+          raise error
+        end
+
+        attempt += 1
+        announce_retry(call, error, attempt, delay)
+        Kernel.sleep(delay)
+      end
     end
 
-    # @return [Response, Array(APIError, Boolean)]
+    # One HTTP attempt. Returns a Response, or [error, kind]. Errors are
+    # returned rather than raised so the retry decision can use facts about
+    # this attempt without storing state on the (shared) Connection.
+    def attempt_request(call, query, body, headers)
+      started = monotonic_now
+      raw = @transport.call(call[:method], call[:path], query: query, body: body, headers: headers)
+      log(:info) { "#{call[:method].upcase} #{call[:path]} -> #{raw.status} (#{elapsed_ms(started)}ms)" }
+      interpret(raw)
+    rescue ConnectionError => e
+      [e, e.request_may_have_been_sent? ? :unknown : :not_sent]
+    rescue MalformedResponseError => e
+      [e, :undocumented]
+    end
+
+    # @return [Response, Array(Error, Symbol)]
     def interpret(raw)
       body = parse_body(raw)
       status = effective_status(raw.status, body)
       return Response.new(http_status: raw.status, headers: raw.headers, body: body) if success?(status)
 
+      error = api_error(status, raw, body)
       # An error reported only inside a 2xx body is undocumented for v3, so
-      # nothing is known about whether ClickSend acted on the request: never
-      # retry it, whatever the reported code.
-      [api_error(status, raw, body), status == raw.status]
+      # nothing is known about whether ClickSend acted on the request.
+      kind = if status != raw.status then :undocumented
+      elsif status == 429 then :rate_limited
+      elsif status >= 500 then :unknown
+      else :rejected
+      end
+      [error, kind]
+    end
+
+    # The safety rule, then the policy's timing and budget.
+    def retry_delay(error, kind, attempt, idempotent)
+      eligible = RETRY_ALWAYS.include?(kind) || (kind == :unknown && idempotent)
+      return unless eligible
+
+      delay = @retry_policy.delay(error: error, attempt: attempt)
+      delay if delay.is_a?(Numeric) && delay.finite? && delay >= 0
+    end
+
+    def announce_retry(call, error, attempt, delay)
+      log(:warn) do
+        "#{call[:method].upcase} #{call[:path]} failed (#{error.class.name}), retrying in #{format("%.2f", delay)}s " \
+          "(retry #{attempt} of #{@retry_policy.max_retries})"
+      end
+      @instrumenter.instrument(
+        "retry.clicksend",
+        call.slice(:method, :path, :operation).merge(attempt: attempt, delay: delay, error_class: error.class.name, http_status: error_status(error))
+      )
     end
 
     def api_error(status, raw, body)
@@ -132,6 +189,14 @@ module Clicksend
 
     def success?(status)
       (200..299).cover?(status)
+    end
+
+    def error_status(error)
+      error.http_status if error.respond_to?(:http_status)
+    end
+
+    def error_code(error)
+      error.response_code if error.respond_to?(:response_code)
     end
 
     def string_or_nil(value)
