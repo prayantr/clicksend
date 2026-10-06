@@ -111,6 +111,15 @@ RSpec.describe Clicksend::OpenTelemetry::Instrumenter do
       expect(fake.requests.size).to eq(1)
       expect(fake.sent_messages.size).to eq(1) # ClickSend did process it: exactly why it must not be retried
     end
+
+    it "does not mark a per-message rejection as an error: the HTTP call itself succeeded" do
+      fake.reject(to: "+61400000000", status: "INVALID_RECIPIENT")
+      expect { traced_client.sms.deliver(to: "+61400000000", body: text) }.to raise_error(Clicksend::MessageRejected)
+
+      expect(clicksend_span.status.code).to eq(OpenTelemetry::Trace::Status::UNSET)
+      expect(clicksend_span.attributes).to include("http.response.status_code" => 200, "clicksend.ambiguous" => false)
+      expect(clicksend_span.attributes).not_to have_key("error.type")
+    end
   end
 
   describe "when the tracer itself fails" do

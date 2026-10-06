@@ -1,64 +1,116 @@
-# clicksend-opentelemetry (prototype, 1.2 spike)
+# clicksend-opentelemetry
 
-OpenTelemetry spans for [clicksend](../../README.md), built on its public
-`instrumenter:` hook. Depends on `opentelemetry-api` only; your application
-chooses the SDK and exporter.
+OpenTelemetry spans for the [clicksend](../../README.md) gem, built only on its public
+`instrumenter:` hook. It depends on `opentelemetry-api`; your application chooses the SDK and
+exporter.
+
+> **0.1.0, not yet published to RubyGems.** It lives in the clicksend repository and is released
+> separately from `clicksend`, on its own version line ([CHANGELOG](CHANGELOG.md)). While it is
+> 0.x, a minor release may rename attributes as OpenTelemetry's semantic conventions change.
+> Unofficial: not affiliated with ClickSend.
+
+Requires Ruby 3.3 or newer, `clicksend` 1.x (1.1 or later) and `opentelemetry-api` 1.x.
+
+## Installation
+
+Until it is on RubyGems, Bundler can take it from the repository (the gemspec is not at the
+repository's root, hence `glob:`):
 
 ```ruby
 # Gemfile
-gem "clicksend-opentelemetry"
+gem "clicksend-opentelemetry", git: "https://github.com/prayantr/clicksend",
+  glob: "companions/clicksend-opentelemetry/*.gemspec"
+```
 
+## Usage
+
+```ruby
 # config/initializers/clicksend.rb
 require "clicksend/opentelemetry"
-CLICKSEND = Clicksend::Client.new(instrumenter: Clicksend::OpenTelemetry::Instrumenter.new)
 
-# Keeping ActiveSupport::Notifications subscribers as well (the OpenTelemetry one last):
+CLICKSEND = Clicksend::Client.new(instrumenter: Clicksend::OpenTelemetry::Instrumenter.new)
+```
+
+The instrumenter takes its tracer from the global provider when it is built. Before
+`OpenTelemetry::SDK.configure` runs, that is the API's proxy, which forwards to the SDK once it is
+configured, so the order of your initializers doesn't matter. Pass `tracer_provider:` to use
+another provider.
+
+To keep your `ActiveSupport::Notifications` subscribers as well, combine both with `FanOut`. Put
+the OpenTelemetry instrumenter **last**: its span then covers only the request, and a subscriber
+that raises after the request finished (which the client ignores) is not recorded as the span's
+error.
+
+```ruby
 CLICKSEND = Clicksend::Client.new(
   instrumenter: Clicksend::OpenTelemetry::FanOut.new(ActiveSupport::Notifications, Clicksend::OpenTelemetry::Instrumenter.new)
 )
 ```
 
-Pass `base_url:` to the instrumenter too if the client does not use the default
-`https://rest.clicksend.com` (the instrumentation payload has no host).
-`record_path: false` leaves out `url.path`.
+Options:
+- `base_url:` the client's `base_url`, if it isn't the default `https://rest.clicksend.com`. The
+  instrumentation payload has no host, so `server.address` and `server.port` come from here.
+- `record_path: false` leaves out `url.path`. Paths never contain a query string, but some contain
+  a message ID (`sms.receipt`, `sms.cancel`), and paths you pass to `client.request` are recorded as
+  you wrote them.
 
 ## What is recorded
 
-One span per API call, retries included: kind CLIENT, named `clicksend <operation>`
-(e.g. `clicksend sms.deliver`), or `clicksend <METHOD>` for `client.request` without `operation:`.
+One span per API call, retries included: kind CLIENT, named `clicksend <operation>` (for example
+`clicksend sms.deliver`), or `clicksend <METHOD>` for `client.request` without `operation:`. Paths
+are never used in span names, because they can contain IDs. `sms.search_history` reads history page
+by page, so it produces one `clicksend sms.history` span per page.
 
 | Attribute | From |
 |---|---|
 | `http.request.method`, `url.path`, `server.address`, `server.port` | the call |
-| `http.response.status_code` | the last response, if any |
-| `error.type`, span status ERROR, an `exception` event | a failed call: class, HTTP status, ClickSend `response_code` and request line only, never the exception message |
-| `clicksend.operation`, `clicksend.idempotent`, `clicksend.attempts`, `clicksend.ambiguous`, `clicksend.response_code` | the request.clicksend payload |
+| `http.response.status_code` | the last response, if there was one |
+| `error.type`, span status ERROR, an `exception` event | a failed call. The event's message is built from the class, HTTP status, ClickSend's `response_code` and the request line only, never from the exception's own message |
+| `clicksend.operation`, `clicksend.idempotent`, `clicksend.attempts`, `clicksend.ambiguous`, `clicksend.response_code` | the `request.clicksend` payload |
 
-Each retry adds a `clicksend.retry` event (`clicksend.retry.attempt`, `clicksend.retry.delay`
-in seconds, `error.type`, `http.response.status_code`).
+Each retry adds a `clicksend.retry` event (`clicksend.retry.attempt`, `clicksend.retry.delay` in
+seconds, `error.type`, `http.response.status_code`).
 
-Never recorded: phone numbers, message text, request or response bodies, query strings,
-headers, credentials.
+`http.request.method`, `server.*`, `url.path`, `http.response.status_code` and `error.type` are
+OpenTelemetry's stable HTTP attribute names. The span describes a logical call that may span
+several HTTP attempts, so it doesn't claim to be an HTTP client span: it has no `url.full`, and the
+attempt count is `clicksend.attempts`, not `http.request.resend_count` (which describes one
+physical request).
 
-A per-message rejection (`Clicksend::MessageRejected`) is decided after the HTTP call
-succeeded, so its span is not an error.
+Never recorded: phone numbers, message text, `custom_string`, request or response bodies, query
+strings, headers and credentials. The specs check the exported spans for each of these.
 
-## With HTTP-level instrumentation
+A message ClickSend refuses inside an HTTP 200 (`Clicksend::MessageRejected`) is detected after the
+HTTP call succeeded, so its span is not an error.
 
-With `opentelemetry-instrumentation-faraday`, each HTTP attempt is a child CLIENT span
-(Net::HTTP's own span is then suppressed); with only `-net_http`, each attempt is a
-`GET`/`POST` span plus a `connect` span. **Those spans record the query string**
-(`url.full` / `url.query`): `sms.history(to:)` puts the phone number in them. Their
-instrumentation also sends a `traceparent` header to ClickSend.
+## HTTP-level instrumentation records the query string
+
+With `opentelemetry-instrumentation-faraday`, each HTTP attempt becomes a child CLIENT span of this
+gem's span (Net::HTTP's own span is then suppressed). With only
+`opentelemetry-instrumentation-net_http`, each attempt is a `GET`/`POST` span plus a `connect`
+span. **Those spans record the query string** (`url.full` or `url.query`), and
+`sms.history(to:)` and `sms.search_history` put the recipient's phone number there
+(`q=to:+61...`). Those instrumentations also send a `traceparent` header to ClickSend. This gem
+can't change what they record: configure them, or don't install them for an application that
+calls history by number.
 
 ## Guarantees
 
-The instrumenter never changes a call's outcome: its own failures go to
-`OpenTelemetry.handle_error`, the request runs exactly once, and errors (including
-ambiguity) pass through unchanged. `spec/` proves this with a failing tracer, a send
-timeout and a real local server.
+The instrumenter never changes a call's outcome. Its own failures go to
+`OpenTelemetry.handle_error`, the request runs exactly once, and errors, including ambiguous
+ones, pass through unchanged. A send that times out is still a single-attempt, ambiguous
+`Clicksend::TimeoutError` with tracing on. The specs show this with a failing tracer, a failing
+span, a send timeout against `Clicksend::Testing::FakeAPI`, and a real local server.
+
+## Development
+
+The specs run against the `clicksend` in this repository (`path: "../.."` in the Gemfile), with
+their own bundle:
 
 ```sh
-BUNDLE_GEMFILE=companions/clicksend-opentelemetry/Gemfile bundle install
-cd companions/clicksend-opentelemetry && bundle exec rspec
+cd companions/clicksend-opentelemetry
+bundle install
+bundle exec rspec
 ```
+
+When the core gem's version changes, run `bundle install` here too, so `Gemfile.lock` matches it.

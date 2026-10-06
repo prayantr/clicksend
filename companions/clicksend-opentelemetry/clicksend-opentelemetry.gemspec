@@ -9,23 +9,30 @@ Gem::Specification.new do |spec|
   spec.email = ["amit@prayantr.com"]
 
   spec.summary = "OpenTelemetry spans for the clicksend gem's instrumentation hook."
-  spec.description = "An instrumenter for Clicksend::Client that opens one CLIENT span per ClickSend API call, " \
-    "with retries as span events. Never records phone numbers, message text, bodies, query strings or credentials."
+  spec.description = <<~DESC.tr("\n", " ").strip
+    An instrumenter for Clicksend::Client that opens one CLIENT span per ClickSend API call,
+    with retries as span events. Never records phone numbers, message text, bodies, query
+    strings or credentials. Not affiliated with ClickSend.
+  DESC
   spec.homepage = "https://github.com/prayantr/clicksend"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.3"
 
   spec.metadata = {
     "source_code_uri" => "#{spec.homepage}/tree/master/companions/clicksend-opentelemetry",
+    "changelog_uri" => "#{spec.homepage}/blob/master/companions/clicksend-opentelemetry/CHANGELOG.md",
+    "bug_tracker_uri" => "#{spec.homepage}/issues",
+    "documentation_uri" => "#{spec.homepage}/blob/master/companions/clicksend-opentelemetry/README.md",
+    "allowed_push_host" => "https://rubygems.org",
     "rubygems_mfa_required" => "true"
   }
 
-  spec.files = Dir["lib/**/*.rb", "README.md"]
+  spec.files = Dir["lib/**/*.rb", "README.md", "CHANGELOG.md", "LICENSE.txt"]
   spec.require_paths = ["lib"]
 
   # The instrumenter contract (event names and payload keys) is clicksend's
   # public API since 1.1; a 2.0 may change it.
-  spec.add_dependency "clicksend", ">= 1.1", "< 2"
+  spec.add_dependency "clicksend", "~> 1.1"
   # The API only: the application chooses (or omits) the SDK and exporters.
   spec.add_dependency "opentelemetry-api", "~> 1.1"
 end
