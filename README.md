@@ -15,7 +15,7 @@ concentrates on the messaging core and on what running it in production needs:
   silently treated as sent.
 - Retries are designed to avoid sending a duplicate SMS. A missed retry is recoverable; a
   duplicate SMS is not. When a send's outcome is unknown, the error says so
-  ([`AmbiguousRequestError`](#when-a-sends-outcome-is-unknown)), and history lets you check.
+  ([`AmbiguousRequestError`](#when-a-sends-outcome-is-unknown)), and history can help you check.
 - Instrumentation for ActiveSupport::Notifications, an in-memory fake ClickSend for your
   tests, and parsers for ClickSend's webhooks.
 
@@ -226,8 +226,9 @@ end
 ```
 
 It is still the error class it was, so `rescue Clicksend::TimeoutError` keeps working.
-Failures that are known not to have been processed (a refused connection, a 429, a 4xx response,
-or a message ClickSend refused) are not ambiguous. An error ClickSend reports inside a 2xx
+Failures the gem treats as not processed (a refused connection, a 429, a 4xx response, or a
+message ClickSend refused) are not ambiguous. Apart from the refused connection, that is an
+inference from ClickSend's documentation and observed behaviour, not a guarantee. An error ClickSend reports inside a 2xx
 answer is ambiguous whatever its code, because that behaviour is undocumented.
 
 To check, look the message up in [history](#message-history) by recipient and match your own
@@ -248,7 +249,7 @@ ClickSend can push receipts and replies to a [webhook](#webhooks), or you can po
 Polling needs rules with the **POLL** action for SMS receipts and inbound SMS. You can set these
 up in the dashboard or through the
 [automations API](https://developers.clicksend.com/docs/automations/sms). ClickSend's test
-numbers never produce receipts.
+numbers produced no receipt in our live check, and ClickSend's legacy v2 docs say none are generated.
 
 ```ruby
 started_at = Time.now
@@ -307,11 +308,18 @@ end
 works out which of the two it was given. Pass the body parameters, not the route ones, so your
 secret isn't kept in `#raw`.
 
-**ClickSend doesn't sign or authenticate webhooks.** It documents no signature, shared secret or
-IP ranges, so anyone who learns the URL can send a fake receipt. This gem therefore offers no
-"verify" method. Instead:
-- put an unguessable secret in the URL, compare it in constant time, and use HTTPS;
-- treat a push as a hint. A receipt can be confirmed with `client.sms.receipt(message_id)`. An
+> **Experimental.** ClickSend doesn't document the push format, and no real push has been captured
+> for this gem yet: the field names come from ClickSend's polling API and archived docs. The
+> `Clicksend::Webhook` API may change in a minor release.
+
+**ClickSend documents no way to authenticate webhooks.** There is no documented signature, shared
+secret or IP range, so treat anyone who learns the URL as able to send a fake receipt. This gem
+therefore offers no "verify" method. Instead:
+- put an unguessable secret in the URL, compare it in constant time, and use HTTPS. A secret in the
+  path appears in access logs (Rails logs the path, and proxies and APM tools often keep it), so
+  restrict who can read them, and filter `body`, `from` and `to` with `filter_parameter_logging`;
+- treat a push as a hint. A receipt can probably be confirmed with `client.sms.receipt(message_id)`
+  (not yet verified for an account with only URL rules), at one API call per check. An
   inbound message can't be fetched by its ID through any wrapped or verified endpoint; the closest
   check is `client.sms.history(from: number)`. Be careful acting on unconfirmed replies such as
   "STOP";
@@ -319,10 +327,12 @@ IP ranges, so anyone who learns the URL can send a fake receipt. This gem theref
   ClickSend's archived docs) a non-200 answer is retried every 10 minutes, up to 10 times;
 - answer 200 quickly and do the work in a job.
 
-Receipt rules post form fields. Inbound rules post form fields by default, or use a query string
-(`webhook_type: "get"`) or JSON (`"json"`). ClickSend's current documentation doesn't define the
-push fields. The parsers use the field names of the polling API, which match ClickSend's archived
-push documentation, and reject payloads with too many fields, oversized values or nested values.
+Inbound rules post form fields by default, or use a query string (`webhook_type: "get"`) or JSON
+(`"json"`); for JSON, pass `JSON.parse(request.raw_post)` or Rails' parsed body parameters. Receipt
+pushes are form-encoded according to ClickSend's archived docs. The parsers use the field names of
+the polling API, which match the archived push documentation, and reject payloads with too many
+fields, oversized or non-UTF-8 values, or nested values in the fields they read. Pass a plain
+Hash of the body parameters rather than Rails' `params`, which also holds route parameters.
 
 ## Message history
 
@@ -415,7 +425,7 @@ send something twice**:
 
 | Failure | Retried for |
 |---|---|
-| 429 Too Many Requests (waits for `Retry-After` if it is 30s or less) | every request: documented as not served |
+| 429 Too Many Requests (waits for `Retry-After` if it is 30s or less) | every request: documented as "cannot be served" |
 | Connection refused, DNS failure, connect timeout | every request: it never reached ClickSend |
 | Read timeout, connection reset, TLS error, 5xx | idempotent requests only: `GET`s, mark-read calls with `before:`, and marking one reply read |
 | An error reported inside a 2xx body; any other 4xx | never |
@@ -444,11 +454,12 @@ about failures that are safe to retry, so no policy can make a send repeat.
 **Rate limits.** ClickSend doesn't publish its rate limits. In testing, `GET /v3/account` allowed
 20 requests per roughly 60 seconds, sent `x-ratelimit-limit`, `x-ratelimit-remaining` and
 `ratelimit-reset` headers, and answered 429 with `Retry-After` values of 20-39 seconds. Those
-headers are undocumented, but when they are present you can read them:
+headers are undocumented, but when they are present you can read them (**experimental**:
+`Clicksend::RateLimit` may change in a minor release if ClickSend changes the headers):
 
 ```ruby
 response = client.request(:get, "/v3/account")
-response.rate_limit  # => #<data Clicksend::RateLimit limit=20, remaining=19, reset_in=60, reset_at=...>, or nil
+response.rate_limit  # => #<data Clicksend::RateLimit limit=20, remaining=19, reset_in=60>, or nil
 response.request     # => #<Clicksend::RequestInfo GET /v3/account ... attempts=1>
 
 begin
@@ -465,35 +476,45 @@ check whether that library retries requests by itself.
 
 ## Background jobs
 
-Job frameworks retry failed jobs, which can undo the gem's care about duplicates. The rule that
-keeps a job safe: **a send that failed without being ambiguous was not processed, so retrying the
-job is safe; an ambiguous send must never be retried**, and nothing after it may raise.
+Job frameworks retry failed jobs, which can undo the gem's care about duplicates. Two rules keep a
+send job as safe as the gem can make it:
+- **Never let an ambiguous send be retried**, and make sure nothing after it raises.
+- **Other failed sends may be retried.** The gem treats them as not processed: refused
+  connections, 429s, 4xx responses and per-message rejections. For 4xx and rejections that is
+  how ClickSend behaves in practice, not something it documents.
 
 ```ruby
 class SendSmsJob < ApplicationJob
+  self.log_arguments = false # don't put phone numbers or message text in job logs
+
   # Rails checks these from the bottom up, so the more specific rule comes last.
-  retry_on Clicksend::Error, attempts: 5, wait: :polynomially_longer # not processed: safe to repeat
+  retry_on Clicksend::Error, attempts: 5, wait: :polynomially_longer # treated as not processed
   discard_on Clicksend::MessageRejected                               # ClickSend refused the message itself
 
-  def perform(phone, body, reference)
-    CLICKSEND.sms.deliver(to: phone, body: body, custom_string: reference)
+  def perform(notification_id)
+    notification = Notification.find(notification_id)
+    CLICKSEND.sms.deliver(to: notification.phone, body: notification.text, custom_string: "notification:#{notification_id}")
   rescue Clicksend::AmbiguousRequestError
     # The message may have gone out. Hand over to a reconciliation step, and make sure nothing
     # here raises: an exception would make the job runner retry the send.
     begin
-      ReconcileSmsJob.perform_later(reference) # e.g. checks sms.history for the reference
+      ReconcileSmsJob.perform_later(notification_id) # e.g. checks sms.history for the reference
     rescue => e
-      Rails.logger.error("SMS #{reference}: outcome unknown, reconciliation not enqueued (#{e.class})")
+      Rails.logger.error("SMS for notification #{notification_id}: outcome unknown, reconciliation not enqueued (#{e.class})")
     end
   end
 end
 ```
 
-Ambiguous errors are rescued inside `perform`, so `retry_on` only ever sees errors that were
-not processed: a 429, a connection that never reached ClickSend, a 4xx. `retryable?` is
-narrower: it is false for a 4xx such as a 401, because repeating it won't help. When
-`retry_on` gives up, Rails re-raises the error and your queue backend may retry the job again;
-that is still safe for these errors.
+Ambiguous errors are rescued inside `perform`, so `retry_on` only sees errors the gem treats as
+not processed. When `retry_on` gives up, Rails re-raises the error and your queue backend may
+retry the job again.
+
+**Job runners are at-least-once.** If a worker is killed or shut down mid-send (Sidekiq's default
+shutdown timeout, 25s, is shorter than the gem's 30s read timeout), the job runs again and the
+gem never sees the first attempt's outcome. If a duplicate matters, record that a send is in
+flight before calling `deliver`, and reconcile instead of sending when a job finds that record
+already there. The gem can't do this for you: only your database knows which jobs started.
 
 ## Calling other ClickSend endpoints
 
@@ -552,9 +573,10 @@ end
 | `request.clicksend` | around each call, retries included | `http_method`, `path`, `operation`, `idempotent`; on completion `attempts`, `http_status` (nil without a response), `response_code`, `ambiguous`. ActiveSupport adds `exception` on failure |
 | `retry.clicksend` | before each retry | `http_method`, `path`, `operation`, `attempt` (1 for the first retry), `delay`, `error_class`, `http_status` |
 
-Payloads never contain credentials, headers, query strings, bodies, phone numbers or message
-text. (An exception object attached by ActiveSupport carries the response body of an API error,
-as `#body` does.)
+Payloads never contain credentials, headers, query strings or bodies, and the wrapped methods' paths
+contain no phone numbers or message text. Paths and `operation:` labels you pass to `client.request`
+are reported as you wrote them, minus any query string or fragment. (An exception object attached
+by ActiveSupport carries the response body of an API error, as `#body` does.)
 
 A `Clicksend::Client` is frozen after construction and holds no mutable state. The default
 Net::HTTP adapter opens a connection per request, which costs a TLS handshake each time; for
@@ -611,14 +633,16 @@ fake.fail_next(:timeout, processed: true, path: "/v3/sms/send", times: 2) # only
 ```
 
 The fake also serves receipts, replies (marked read as ClickSend documents; whether the cutoff is
-inclusive is the fake's guess), history and the account. Exceptions raised by your stub blocks
-surface as `Clicksend::Testing::StubError`, never as a simulated ClickSend failure.
+inclusive is the fake's guess) and the account. Exceptions raised by your stub blocks surface as
+`Clicksend::Testing::StubError`, never as a simulated ClickSend failure.
+
+It deliberately **doesn't serve history**: ClickSend doesn't say how soon a sent message appears
+there, and an always-current fake history would let a "not in history, so resend" rule pass its
+tests and send twice in production. Stub `GET /v3/sms/history` with the rows each test needs.
 
 The fake simplifies, so don't let your tests depend on these:
-- History is immediately consistent; ClickSend doesn't say it is. A sent message without a
-  receipt shows `status: "Completed"` and a nil `status_code`, as observed live.
 - Recipients that aren't 6 to 15 digits (optionally after `+`) get `INVALID_RECIPIENT`; ClickSend's
-  own rules decide in reality.
+  own rules decide in reality. It never answers `THROTTLED`, and test numbers always succeed.
 - The balance never changes, and message parts are estimated.
 
 It can stand in as a development "dry run" transport too.

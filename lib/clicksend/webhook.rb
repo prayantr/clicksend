@@ -4,21 +4,28 @@ module Clicksend
   # Parses delivery receipts and inbound SMS that ClickSend pushes to your URL.
   # Pure functions over params your web framework has already decoded; no I/O.
   #
-  # ClickSend pushes through automation rules with the +URL+ action. Receipt
-  # rules POST form-encoded fields. Inbound rules POST a form (the default),
-  # GET with a query string, or POST JSON, by the rule's +webhook_type+.
-  # ClickSend does not document the JSON field names; this assumes they are
-  # the same. The current docs define no push payload at all: the field names
-  # come from the poll schemas (+sms_receipt+, +inbound_sms+), which match the
-  # archived push docs. Pushes also carry +user_id+ and, on receipts, +status+
-  # ("Delivered"/"Undelivered"); those stay in +raw+.
+  # *Experimental*: ClickSend's current docs define no push payload, and no
+  # real push has been captured for this gem yet. This API may change in a
+  # minor release.
   #
-  # ClickSend does NOT sign or authenticate pushes: no HMAC, signature,
-  # secret or published IP ranges. Anyone who knows the URL can forge one, so:
-  # - put an unguessable secret in the URL path and compare it in constant time;
+  # ClickSend pushes through automation rules with the +URL+ action. Inbound
+  # rules POST a form (the default), GET with a query string, or POST JSON, by
+  # the rule's +webhook_type+; ClickSend does not document the JSON field
+  # names, and this assumes they are the same. Receipt pushes are form-encoded
+  # according to the archived v3 docs. The field names come from the poll
+  # schemas (+sms_receipt+, +inbound_sms+), which match the archived push
+  # docs. According to those, pushes also carry +user_id+ and, on receipts,
+  # +status+ ("Delivered"/"Undelivered"); those stay in +raw+.
+  #
+  # ClickSend documents no signing or authentication for pushes: no HMAC,
+  # signature, secret or published IP ranges. Treat anyone who knows the URL
+  # as able to forge one, so:
+  # - put an unguessable secret in the URL path and compare it in constant time
+  #   (it will appear in access logs: restrict who reads them);
   # - use HTTPS;
-  # - treat the event as a hint, and confirm anything consequential with
-  #   <tt>client.sms.receipt(event.message_id)</tt>;
+  # - treat the event as a hint; a receipt can probably be confirmed with
+  #   <tt>client.sms.receipt(event.message_id)</tt> (not yet verified for
+  #   accounts with only URL rules);
   # - process idempotently by +message_id+: several matching rules may each push,
   #   and (per the archived docs) a non-200 is retried every 10 minutes, 10 times;
   # - answer 200 quickly and do the work in a job.

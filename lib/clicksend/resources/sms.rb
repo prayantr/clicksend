@@ -168,10 +168,10 @@ module Clicksend
       # at most one of +to+, +from+, +status+ and +message_id+ may be given.
       # +custom_string+ is not a documented filter: match on it yourself.
       #
-      # This is the way to check whether an ambiguous send (an
-      # AmbiguousRequestError from #deliver) was accepted. ClickSend does not
-      # document how soon a sent message appears here, so a message missing
-      # from history is not proof that it was not sent.
+      # This is the closest documented way to look for an ambiguous send (an
+      # AmbiguousRequestError from #deliver). ClickSend does not document how
+      # soon a sent message appears here, so a message missing from history is
+      # not proof that it was not sent.
       #
       # @param date_from [Time, Integer, nil] earliest send time
       # @param date_to [Time, Integer, nil] latest send time

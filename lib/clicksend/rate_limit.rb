@@ -8,8 +8,10 @@ module Clicksend
   # observed on GET /v3/account (2026-10-05): +x-ratelimit-limit+,
   # +x-ratelimit-remaining+ and +ratelimit-reset+ (seconds until the window
   # resets). Treat every field as advisory and possibly nil; nil overall means
-  # none of the headers were present. Because the headers are undocumented,
-  # this may change if ClickSend changes them.
+  # none of the headers were present.
+  #
+  # *Experimental*: because the headers are undocumented, this may change in
+  # a minor release if ClickSend changes them.
   RateLimit = Data.define(:limit, :remaining, :reset_in)
 
   class RateLimit
