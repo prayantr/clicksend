@@ -27,6 +27,30 @@ jobs:
           bundler-cache: true
       - run: bundle exec rspec
 
+  # The OpenTelemetry companion gem, with its own Gemfile and lockfile, against the clicksend in
+  # this checkout. Its dependencies never enter the core bundle.
+  companion-opentelemetry:
+    name: clicksend-opentelemetry, Ruby ${{ matrix.ruby }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["3.3", "3.4", "4.0"]
+    defaults:
+      run:
+        working-directory: companions/clicksend-opentelemetry
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: companions/clicksend-opentelemetry
+      - run: bundle exec rspec
+      - run: gem build clicksend-opentelemetry.gemspec --strict
+
   lint:
     runs-on: ubuntu-latest
     steps:
