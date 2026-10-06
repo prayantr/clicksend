@@ -100,6 +100,27 @@ RSpec.describe Clicksend::Client do
       expect(PP.pp(c, +"")).not_to include(ApiHelpers::API_KEY)
     end
 
+    it "refuses Marshal, directly or inside another object, so the API key can't reach a cache or a queue" do
+      c = client
+      [c, [c], {client: c}, c.sms, c.with(timeout: 5)].each do |object|
+        expect { Marshal.dump(object) }.to raise_error(TypeError, "Clicksend::Client contains credentials and can't be marshaled; build a new client instead")
+      end
+    end
+
+    it "still lets errors and responses from a call be marshaled" do
+      stub_api(:get, "/v3/account").to_return(json_response(envelope({"user_id" => 1})), {status: 404, body: ""})
+      c = client(max_retries: 0)
+      response = c.request(:get, "/v3/account")
+      error = begin
+        c.request(:get, "/v3/account")
+      rescue Clicksend::NotFoundError => e
+        e
+      end
+      expect(Marshal.load(Marshal.dump(response))).to eq(response) # rubocop:disable Security/MarshalLoad
+      expect(Marshal.load(Marshal.dump(error))).to have_attributes(class: Clicksend::NotFoundError, http_status: 404, request: error.request) # rubocop:disable Security/MarshalLoad
+      expect(Marshal.dump([response, error])).not_to include(ApiHelpers::API_KEY)
+    end
+
     it "never logs credentials, bodies or query strings" do
       log = StringIO.new
       stub_api(:get, "/v3/sms/history", query: hash_including({})).to_return(json_response(envelope({}), status: 401))

@@ -33,6 +33,10 @@ Planned as 1.2.0. Additive.
   another thread, or after swallowing an exception that escaped the request, the call raises a
   `ConfigurationError` that is also an `AmbiguousRequestError` unless the request is idempotent
   (before, `Client#request` could return nil while the send went ahead).
+- **`Clicksend::Client` refuses `Marshal.dump`** (`TypeError`), including inside another object
+  such as `client.sms`. A client holds the API key, which `Marshal` used to write out in clear
+  (e.g. into a cache or a job payload). Build a new client instead. Responses and errors can still
+  be marshaled.
 
 ### Changed
 

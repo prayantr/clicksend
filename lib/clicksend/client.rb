@@ -171,6 +171,14 @@ module Clicksend
     end
     alias_method :to_s, :inspect
 
+    # A client holds the API key (in its settings and its Authorization
+    # header), so it must never be written to a cache, a job queue or a
+    # session by Marshal. Marshal checks #marshal_dump first, for frozen
+    # objects too.
+    def marshal_dump
+      raise TypeError, "#{self.class.name} contains credentials and can't be marshaled; build a new client instead"
+    end
+
     private
 
     # Surrounding whitespace (e.g. a trailing newline from a secrets file) is
