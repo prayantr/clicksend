@@ -714,6 +714,50 @@ Clicksend::Client.new(username: "test", api_key: "test", transport: fake,
   retry_policy: Clicksend::RetryPolicy.new(base_delay: 0, max_delay: 0))
 ```
 
+**Assert on what was sent.** Opt-in matchers and assertions read `fake.sent_messages` (accepted
+messages; rejected recipients don't count). The gem depends on neither framework: these files load
+only when your test suite requires them. Each key is optional and names a `SentMessage` attribute
+(`to`, `body`, `custom_string`, `from`, `list_id`, `scheduled_at`, `country`, `message_id`,
+`sent_at`). Values are matched with `===`, so strings, regexps and procs all work. **Without a
+count, exactly one message must match**, because a second one is the duplicate you are testing
+for. A failure lists what was sent, one line per message, at most ten messages.
+
+```ruby
+require "clicksend/testing/rspec" # in spec/spec_helper.rb; adds the matchers to every example group
+
+RSpec.describe "sign-in codes" do
+  let(:fake) { Clicksend::Testing::FakeAPI.new } # a new fake per example, so there is nothing to reset
+
+  it "texts the code once" do
+    fake.client.sms.deliver(to: "+61411111111", body: "Your code is 481516", custom_string: "otp:42") # your code, given fake.client
+
+    expect(fake).to have_sent_sms(to: "+61411111111", body: /481516/, custom_string: "otp:42")
+    expect(fake).to have_sent_sms(custom_string: "otp:42").once # also .twice, .times(n), .exactly(n).times
+    expect(fake).not_to have_sent_sms(to: "+61422222222")       # none matching, however many
+  end
+
+  it "texts nobody until asked" do
+    expect(fake).to have_sent_no_sms
+  end
+end
+```
+
+```ruby
+require "clicksend/testing/minitest"
+
+class SignInCodeTest < Minitest::Test # or ActiveSupport::TestCase
+  include Clicksend::Testing::MinitestAssertions
+
+  def test_texts_the_code_once
+    fake = Clicksend::Testing::FakeAPI.new
+    fake.client.sms.deliver(to: "+61411111111", body: "Your code is 481516", custom_string: "otp:42") # your code, given fake.client
+
+    assert_sms_sent fake, to: "+61411111111", body: /481516/, custom_string: "otp:42" # count: 2 for two
+    assert_no_sms_sent fake, to: "+61422222222"
+  end
+end
+```
+
 **Simulate failures, including the ambiguous ones.** For outcomes where it matters you must say
 whether ClickSend processed the request before the failure, which is exactly the question your
 code has to cope with:
@@ -727,6 +771,25 @@ fake.fail_next(:connection_refused)         # never sent: the gem retries it tra
 fake.fail_next(status: 429, retry_after: 0) # rate limited: retried
 fake.fail_next(status: 401)
 fake.fail_next(:timeout, processed: true, path: "/v3/sms/send", times: 2) # only matching requests
+fake.fail_next(:interrupted, processed: false) # not ClickSend: your job runner stopping the worker (below)
+```
+
+**Simulate the worker being stopped mid-send.** Job runners re-run a job that was stopped while
+running. Sidekiq's shutdown pushes busy jobs back to the queue and raises into their threads, and a
+deploy's SIGTERM or a killed process does much the same. If that happens during a send, the re-run
+sends again unless your job recorded "sending" before the call. `fail_next(:interrupted, ...)` lets
+you test that. It models your job runner, not anything ClickSend does: the fake raises
+`Clicksend::Testing::SimulatedInterrupt`, either after ClickSend accepted the message
+(`processed: true`) or before it saw it (`processed: false`). It is an `Exception` but not a
+`StandardError`, so the client lets it through untouched and never retries it, and a
+`rescue => e` doesn't catch it. It is not an `Interrupt` either, so an unrescued one fails just
+that test.
+
+```ruby
+fake.fail_next(:interrupted, processed: true, path: "/v3/sms/send") # stopped after ClickSend accepted it
+expect { SendOtpJob.perform_now(otp.id) }.to raise_error(Clicksend::Testing::SimulatedInterrupt) # the runner requeues it
+SendOtpJob.perform_now(otp.id)                     # the re-run finds your "sending" marker
+expect(fake).to have_sent_sms(custom_string: "otp:#{otp.id}") # exactly one, not two
 ```
 
 The fake also serves receipts, replies (marked read as ClickSend documents; whether the cutoff is

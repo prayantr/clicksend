@@ -83,6 +83,12 @@ module Clicksend
   #
   # A FakeAPI keeps every request in memory until #reset!, so a long-running
   # process should reset it from time to time.
+  #
+  # Assertions for test frameworks are separate, opt-in files, and this gem
+  # depends on neither framework: +require "clicksend/testing/rspec"+ adds
+  # +have_sent_sms+ and +have_sent_no_sms+ (Clicksend::Testing::RSpecMatchers),
+  # +require "clicksend/testing/minitest"+ adds +assert_sms_sent+ and
+  # +assert_no_sms_sent+ (Clicksend::Testing::MinitestAssertions).
   module Testing
   end
 end
