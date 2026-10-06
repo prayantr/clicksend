@@ -100,7 +100,8 @@ RSpec.describe Clicksend::OpenTelemetry::Instrumenter do
       expect(fake.requests.size).to eq(1)
     end
 
-    it "leaves the path out of the exception message too with record_path: false" do
+    it "leaves the path out of the exception message too with record_path: false",
+      clicksend: ">= 1.2", clicksend_reason: "it cancels a message, and sms.cancel was added in 1.2.0" do
       fake.fail_next(status: 500, processed: false)
       client = fake.client(instrumenter: described_class.new(record_path: false))
       expect { client.sms.cancel("ABC-123") }.to raise_error(Clicksend::ServerError)

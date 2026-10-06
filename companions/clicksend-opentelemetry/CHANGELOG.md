@@ -8,6 +8,13 @@ release may rename span attributes as OpenTelemetry's semantic conventions chang
 
 ## [Unreleased]
 
+### Development
+
+- CI also runs the suite against the oldest supported clicksend, 1.1.0 from RubyGems
+  (`gemfiles/clicksend-1.1.gemfile`). An example that needs a newer clicksend declares it
+  (`clicksend: ">= 1.2"`) and is skipped there with its reason; against the current clicksend
+  every example must run. No change to the gem.
+
 ## [0.1.0] - 2026-10-06
 
 The first release.
