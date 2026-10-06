@@ -205,3 +205,119 @@ RSpec.describe Clicksend::Connection, "retries" do
     expect(@transport.calls.map(&:to_h).uniq.size).to eq(1)
   end
 end
+
+# The rule that decides whether a failure may be retried at all lives in the
+# connection, not the policy, so no RetryPolicy (or custom policy) can make a
+# request repeat after it may already have been processed.
+RSpec.describe Clicksend::Connection, "retry safety" do
+  let(:ok) { FakeTransport.json(200, {"http_code" => 200, "response_code" => "SUCCESS", "data" => {}}) }
+
+  before { allow(Kernel).to receive(:sleep) }
+
+  # A policy that would retry anything it is asked about, as often as allowed.
+  let(:eager_policy) do
+    Struct.new(:max_retries, :asked) {
+      def delay(error:, attempt:)
+        asked << error.class
+        0
+      end
+    }.new(5, [])
+  end
+
+  def connection(*outcomes, policy: eager_policy)
+    @transport = FakeTransport.new(*outcomes)
+    described_class.new(transport: @transport, retry_policy: policy)
+  end
+
+  def outcome(name)
+    {
+      rate_limited: FakeTransport.json(429, ""),
+      refused: Clicksend::ConnectionError.new("refused", request_sent: false),
+      read_timeout: Clicksend::TimeoutError.new("read"),
+      reset: Clicksend::ConnectionError.new("reset"),
+      server_error: FakeTransport.json(503, ""),
+      bad_request: FakeTransport.json(400, ""),
+      not_found: FakeTransport.json(404, ""),
+      envelope_error: FakeTransport.json(200, {"http_code" => 500, "data" => nil}),
+      malformed_2xx: FakeTransport.json(200, "<html>")
+    }.fetch(name)
+  end
+
+  #                                   idempotent: [retried?, ambiguous?]   non-idempotent: [retried?, ambiguous?]
+  {
+    rate_limited: [[true, false], [true, false]],
+    refused: [[true, false], [true, false]],
+    read_timeout: [[true, false], [false, true]],
+    reset: [[true, false], [false, true]],
+    server_error: [[true, false], [false, true]],
+    bad_request: [[false, false], [false, false]],
+    not_found: [[false, false], [false, false]],
+    envelope_error: [[false, false], [false, true]],
+    malformed_2xx: [[false, false], [false, true]]
+  }.each do |name, (for_idempotent, for_unsafe)|
+    {true => for_idempotent, false => for_unsafe}.each do |idempotent, (retried, ambiguous)|
+      kind = idempotent ? "an idempotent request" : "a non-idempotent request"
+
+      it "#{retried ? "retries" : "does not retry"} #{name.to_s.tr("_", " ")} on #{kind}#{" and marks it ambiguous" if ambiguous}" do
+        conn = connection(outcome(name), ok)
+        if retried
+          expect(conn.request(:post, "/v3/x", idempotent: idempotent).request.attempts).to eq(2)
+        else
+          expect { conn.request(:post, "/v3/x", idempotent: idempotent) }.to raise_error(Clicksend::Error) { |e|
+            expect(e.ambiguous?).to be(ambiguous)
+            expect(e.is_a?(Clicksend::AmbiguousRequestError)).to be(ambiguous)
+            expect(e.request).to have_attributes(method: :post, path: "/v3/x", idempotent: idempotent, attempts: 1)
+          }
+          expect(eager_policy.asked).to be_empty
+          expect(@transport.calls.size).to eq(1)
+        end
+      end
+    end
+  end
+
+  it "marks an error ambiguous only after the last attempt, when retries were possible" do
+    conn = connection(Clicksend::ConnectionError.new("refused", request_sent: false), Clicksend::TimeoutError.new("read"))
+    expect { conn.request(:post, "/v3/sms/send") }.to raise_error(Clicksend::TimeoutError) { |e|
+      expect(e).to be_ambiguous
+      expect(e.request.attempts).to eq(2)
+    }
+  end
+
+  it "does not retry when the policy returns something other than a non-negative finite number" do
+    [nil, false, -1, Float::INFINITY, "1"].each do |answer|
+      policy = Struct.new(:max_retries, :answer) { def delay(**) = answer }.new(3, answer)
+      expect { connection(FakeTransport.json(503, ""), ok, policy: policy).request(:get, "/v3/x", idempotent: true) }
+        .to raise_error(Clicksend::ServerError)
+      expect(@transport.calls.size).to eq(1)
+    end
+  end
+
+  it "waits for whatever the policy decides" do
+    connection(FakeTransport.json(503, ""), ok, policy: Struct.new(:max_retries) { def delay(**) = 0.25 }.new(1)).request(:get, "/v3/x", idempotent: true)
+    expect(Kernel).to have_received(:sleep).with(0.25)
+  end
+end
+
+RSpec.describe Clicksend::Connection, "request context" do
+  before { allow(Kernel).to receive(:sleep) }
+
+  def connection(*outcomes)
+    @transport = FakeTransport.new(*outcomes)
+    described_class.new(transport: @transport, retry_policy: Clicksend::RetryPolicy.new(max_retries: 2, base_delay: 0))
+  end
+
+  it "attaches the request and attempt count to successful responses" do
+    ok = FakeTransport.json(200, {"data" => {}})
+    response = connection(FakeTransport.json(429, ""), ok).request(:get, "/v3/account", query: {secret: "x"}, idempotent: true, operation: "account.fetch")
+    expect(response.request).to eq(Clicksend::RequestInfo.new(method: :get, path: "/v3/account", operation: "account.fetch", idempotent: true, attempts: 2))
+  end
+
+  it "attaches it to errors, after every attempt was made" do
+    conn = connection(FakeTransport.json(503, ""), FakeTransport.json(503, ""), FakeTransport.json(503, ""))
+    expect { conn.request(:get, "/v3/account", idempotent: true, operation: "account.fetch") }.to raise_error(Clicksend::ServerError) { |e|
+      expect(e.request.attempts).to eq(3)
+      expect(e.request.operation).to eq("account.fetch")
+      expect(e).to be_retryable
+    }
+  end
+end

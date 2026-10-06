@@ -118,6 +118,20 @@ RSpec.describe Clicksend::Resources::SMS, "receipts and replies" do
     end
   end
 
+  describe "#mark_inbound_read retries" do
+    before { allow(Kernel).to receive(:sleep) }
+
+    it "is retried with a cutoff and not without one" do
+      with_cutoff = stub_api(:put, "/v3/sms/inbound-read", body: {date_before: 5}).to_return({status: 503, body: ""}, json_response(envelope(nil)))
+      client.sms.mark_inbound_read(before: 5)
+      expect(with_cutoff).to have_been_requested.twice
+
+      everything = stub_api(:put, "/v3/sms/inbound-read", body: "{}").to_return({status: 503, body: ""}, json_response(envelope(nil)))
+      expect { client.sms.mark_inbound_read }.to raise_error(Clicksend::ServerError) { |e| expect(e).to be_ambiguous }
+      expect(everything).to have_been_requested.once
+    end
+  end
+
   describe "#mark_inbound_read and #mark_inbound_message_read" do
     it "marks all (or earlier) replies read" do
       stub = stub_api(:put, "/v3/sms/inbound-read", body: {date_before: 1_961_900_166}).to_return(json_response(fixture("sms_inbound_read")))
