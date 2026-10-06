@@ -544,8 +544,14 @@ check whether that library retries requests by itself.
 
 ## Background jobs
 
-Job frameworks retry failed jobs, which can undo the gem's care about duplicates. Two rules keep a
-send job as safe as the gem can make it:
+Job runners retry failed jobs and re-run interrupted ones, and either can turn a send whose outcome
+is unknown into a second SMS. The measurements in this section come from experiments with
+ActiveJob 8.1.4, Sidekiq 8.1.7 and ActiveRecord 8.1.4 (SQLite) against local stand-ins for
+ClickSend, not from ClickSend itself.
+
+### A send job
+
+Two rules keep a send job as safe as the gem can make it:
 - **Never let an ambiguous send be retried**, and make sure nothing after it raises.
 - **Other failed sends may be retried.** The gem treats them as not processed: refused
   connections, 429s, 4xx responses and per-message rejections. For 4xx and rejections that is
@@ -561,12 +567,12 @@ class SendSmsJob < ApplicationJob
 
   def perform(notification_id)
     notification = Notification.find(notification_id)
-    CLICKSEND.sms.deliver(to: notification.phone, body: notification.text, custom_string: "notification:#{notification_id}")
+    CLICKSEND_JOBS.sms.deliver(to: notification.phone, body: notification.text, custom_string: "notification:#{notification_id}")
   rescue Clicksend::AmbiguousRequestError
-    # The message may have gone out. Hand over to a reconciliation step, and make sure nothing
-    # here raises: an exception would make the job runner retry the send.
+    # The message may have gone out. Hand over to reconciliation, and make sure nothing here
+    # raises: an exception would make the job runner retry the send.
     begin
-      ReconcileSmsJob.perform_later(notification_id) # e.g. checks sms.history for the reference
+      ReconcileSmsJob.perform_later(notification_id) # e.g. checks sms.search_history for the reference
     rescue => e
       Rails.logger.error("SMS for notification #{notification_id}: outcome unknown, reconciliation not enqueued (#{e.class})")
     end
@@ -574,22 +580,178 @@ class SendSmsJob < ApplicationJob
 end
 ```
 
-Ambiguous errors are rescued inside `perform`, so `retry_on` only sees errors the gem treats as
-not processed. When `retry_on` gives up, Rails re-raises the error and your queue backend may
-retry the job again.
+`CLICKSEND_JOBS` is a client with a shorter timeout, explained under
+[the timeout budget](#the-timeout-budget). Ambiguous errors are rescued inside `perform`, so
+`retry_on` only sees errors the gem treats as not processed.
+
+**Declaration order matters.** `retry_on` and `discard_on` declare `rescue_from` handlers, which
+Rails tries from the bottom up, a job's own before those it inherits. For a send that timed out
+after ClickSend had accepted it:
+
+| The job declares | Messages sent |
+|---|---|
+| only `retry_on Clicksend::Error` | 2 |
+| the recipe above | 1 |
+| `retry_on Clicksend::Error`, then `discard_on Clicksend::AmbiguousRequestError` | 1 |
+| the same two lines in the opposite order | **2** |
+| `discard_on Clicksend::AmbiguousRequestError`, under a `retry_on StandardError` inherited from `ApplicationJob` | 1 |
+
+`discard_on` accepts the `AmbiguousRequestError` module, so it works when it is declared last.
+But moving one line breaks it silently, and a discarded job reconciles nothing unless you give
+`discard_on` a block. Rescuing inside `perform` doesn't depend on order.
+
+**Retry layers stack.** When `retry_on` runs out of attempts it re-raises the error, and the queue
+backend then retries the job under its own policy (Sidekiq: 25 retries by default). Attempts
+multiply: with a persistent 429, `retry_on Clicksend::Error, attempts: 2` made 6 HTTP requests
+(2 job runs, each with the gem's 3 attempts) before the error reached the backend. On Sidekiq's
+ActiveJob adapter, a job that did *not* rescue an ambiguous error sent twice under
+`retry_on attempts: 2`, and was then in Sidekiq's retry set, ready to send a third time. Keep
+ambiguous errors inside `perform`, and pass `retry_on` a block if the backend shouldn't retry after
+it: with a block, `retry_on` calls it instead of re-raising.
+
+### The timeout budget
+
+When a job runner stops (a deploy, a scale-down), it waits a limited time for running jobs, then
+puts the unfinished ones back on the queue. A send still waiting for ClickSend's answer then runs
+again, and the gem never sees how the first attempt ended. A real Sidekiq 8.1.7 process stopped
+mid-send with `-t 2` re-queued the recipe's job, and the message was received **twice** with the
+gem's default 30s read timeout. With `timeout: 1`, the send timed out first, the recipe handled the
+ambiguous error, and the message was received once.
+
+So give jobs a client whose attempts end well inside the runner's shutdown timeout:
+
+```ruby
+# config/initializers/clicksend.rb
+CLICKSEND = Clicksend::Client.new(logger: Rails.logger, instrumenter: ActiveSupport::Notifications)
+# Sidekiq waits 25s by default (-t, :timeout). One attempt here takes at most about 5s to connect
+# plus 15s to answer, and max_retries: 0 leaves not-processed failures to retry_on.
+CLICKSEND_JOBS = CLICKSEND.with(timeout: 15, max_retries: 0)
+```
+
+- The window that matters runs from sending the request to reading the answer. A worker stopped
+  while connecting or backing off has sent nothing, so its re-run sends once. Retries inside the
+  gem add attempts, each with its own window: keep their total inside the budget too, or turn
+  them off as above.
+- Sidekiq's 25 seconds comes from its source (8.1.7), and the duplicate was measured with Sidekiq.
+  Other limits were not tested here: Solid Queue's README gives a default `shutdown_timeout` of
+  5 seconds; Kubernetes (`terminationGracePeriodSeconds`) and Heroku limit how long a stopping
+  process may run; queues with a visibility timeout redeliver a job that runs longer than it.
+  Check yours, and raise it rather than cutting the client's timeout below what ClickSend needs.
+- A shorter timeout turns more slow sends into ambiguous ones: more reconciliation, never a
+  duplicate.
 
 **Never wrap a send in `Timeout.timeout`.** It interrupts the thread at an arbitrary point, which can
 be after ClickSend has already received the message, and raises a plain `Timeout::Error`. That isn't
 a `Clicksend::Error` and isn't marked ambiguous, so neither the gem nor the recipe above can tell
 that the message may have gone out, and a job runner will retry the job and may send it twice. Use
-the client's own timeouts instead (for a job, e.g. `CLICKSEND.with(timeout: 10)`): a read timeout
-then raises an ambiguous `Clicksend::TimeoutError` that the recipe handles.
+the client's own timeouts instead: a read timeout then raises an ambiguous `Clicksend::TimeoutError`
+that the recipe handles.
 
-**Job runners are at-least-once.** If a worker is killed or shut down mid-send (Sidekiq's default
-shutdown timeout, 25s, is shorter than the gem's 30s read timeout), the job runs again and the
-gem never sees the first attempt's outcome. If a duplicate matters, record that a send is in
-flight before calling `deliver`, and reconcile instead of sending when a job finds that record
-already there. The gem can't do this for you: only your database knows which jobs started.
+### Marking a send in flight
+
+A killed process (SIGKILL, out of memory, a lost host), a recovered job or a double enqueue re-runs
+a job however the timeouts are set, and the recipe can't see the first run. If a duplicate matters,
+record that the send is in flight **before** calling `deliver`, on the row that already represents
+the message in your database, and let a run that finds that mark reconcile instead of sending. The
+gem can't do this for you: only your database knows which jobs started. With a worker that died
+after ClickSend had accepted the message:
+
+| Approach | Messages sent |
+|---|---|
+| the recipe alone | 2 |
+| claim and send inside one database transaction | **2**: the dying worker's rollback erased the claim |
+| a conditional `UPDATE`, committed before `deliver` | 1; the re-run found the claim and sent nothing |
+| the same, with 4 runs of one job at once | 1 |
+
+The recipe with a marker:
+
+```ruby
+# notifications: sms_state (string, default "pending"), sms_claimed_at, sms_message_id
+class SendSmsJob < ApplicationJob
+  self.log_arguments = false
+  retry_on Clicksend::Error, attempts: 5, wait: :polynomially_longer # sees only failures that were not processed
+
+  def perform(notification_id)
+    # The claim commits on its own: never call this inside a transaction that also covers deliver.
+    claimed = Notification.where(id: notification_id, sms_state: "pending")
+      .update_all(sms_state: "sending", sms_claimed_at: Time.current) == 1
+    return unless claimed # done, failed, or another run is sending (or died sending): never send here
+
+    notification = Notification.find(notification_id)
+    message = CLICKSEND_JOBS.sms.deliver(to: notification.phone, body: notification.text, custom_string: "notification:#{notification_id}")
+    notification.update_columns(sms_state: "sent", sms_message_id: message.message_id)
+  rescue Clicksend::AmbiguousRequestError
+    Notification.where(id: notification_id).update_all(sms_state: "unknown") # reconciled later, never resent here
+  rescue Clicksend::MessageRejected
+    Notification.where(id: notification_id).update_all(sms_state: "failed")
+  rescue Clicksend::Error
+    Notification.where(id: notification_id, sms_state: "sending").update_all(sms_state: "pending") # not processed
+    raise # release the claim, and let retry_on try again
+  end
+end
+```
+
+Anything that fails after the claim, including the updates in the `rescue` clauses, leaves the row
+`sending`, and a re-run then sends nothing: the safe direction. A 429 that outlasted the gem's
+retries released the claim, and the job's retry sent the message once.
+
+### Reconciling with history
+
+With the marker, reconciliation needs no hand-over: rows left `sending` or `unknown` are the
+work list. Check them with [`search_history`](#when-a-sends-outcome-is-unknown) from a recurring
+job, not straight after the failure: ClickSend doesn't say how soon a sent message appears in
+history.
+
+```ruby
+# Run every few minutes (e.g. a Solid Queue recurring task or a cron job).
+class SmsReconciliationJob < ApplicationJob
+  def perform
+    Notification.where(sms_state: %w[sending unknown]).where("sms_claimed_at < ?", 10.minutes.ago).find_each do |notification|
+      found = CLICKSEND.sms.search_history(to: notification.phone, custom_string: "notification:#{notification.id}",
+        sent_after: notification.sms_claimed_at)
+      if found.any?
+        notification.update_columns(sms_state: "sent", sms_message_id: found.first.message_id)
+      elsif notification.sms_claimed_at < 1.day.ago
+        notification.update_columns(sms_state: "unresolved") # for a person to decide
+      end
+    end
+  end
+end
+```
+
+Not finding the message is **not** a reason to resend it: an empty result doesn't prove that
+nothing was sent. Keep checking for a while, then let a person or the user decide (for a login
+code, the user asking for a new one is usually safer). Each check reads at least one page of
+history, against ClickSend's undocumented rate limits.
+
+### Sidekiq without ActiveJob
+
+The recipe works the same way in a `Sidekiq::Job`. Sidekiq can also stop an ambiguous error that
+escapes `perform` from being retried:
+
+```ruby
+class SendSmsWorker
+  include Sidekiq::Job
+
+  # Safety net: an ambiguous error goes to the Dead set instead of being retried.
+  sidekiq_retry_in { |_count, error, _job| :kill if error.is_a?(Clicksend::AmbiguousRequestError) }
+  sidekiq_retries_exhausted { |job, error| Sidekiq.logger.warn("#{job["class"]} #{job["jid"]} gave up: #{error.class}") }
+
+  def perform(notification_id)
+    # as SendSmsJob#perform above: rescue Clicksend::AmbiguousRequestError and reconcile
+  end
+end
+```
+
+In Sidekiq 8.1.7 (measured with a real Sidekiq process, and read in its source):
+- `:kill` puts the job in the Dead set and calls `sidekiq_retries_exhausted` and the death
+  handlers. **Pressing "Retry Now" on that dead job runs the send again**: reconcile first.
+- `:discard` drops the job and calls only the death handlers, so nothing is left in the Web UI to
+  investigate.
+- `nil` keeps the normal retry schedule.
+
+Prefer rescuing inside `perform` and keep `:kill` as the safety net. `sidekiq_retries_exhausted`
+also runs when the ordinary retries run out.
 
 ## Calling other ClickSend endpoints
 
@@ -639,7 +801,6 @@ ActiveSupport::Notifications.subscribe("request.clicksend") do |event|
   event.payload
   # => {http_method: :post, path: "/v3/sms/send", operation: "sms.deliver", idempotent: false,
   #     attempts: 1, http_status: 200, response_code: "SUCCESS", ambiguous: false}
-  StatsD.distribution("clicksend.request", event.duration, tags: ["operation:#{event.payload[:operation]}"])
 end
 ```
 
@@ -653,20 +814,87 @@ contain no phone numbers or message text. Paths and `operation:` labels you pass
 are reported as you wrote them, minus any query string or fragment. (An exception object attached
 by ActiveSupport carries the response body of an API error, as `#body` does.)
 
-**OpenTelemetry and other generic HTTP instrumentation.** Auto-instrumentation of Faraday or
-Net::HTTP (for example `opentelemetry-instrumentation-faraday`) works below this gem and records the
-full request URL, query string included. `sms.history(to: ...)` sends `q=to:+61...`, so recipients'
-phone numbers can end up in your traces. Configure that instrumentation to drop or sanitise URLs and
-query strings, or exclude ClickSend's host from it. ClickSend-specific tracing built on this gem's
-`request.clicksend` events doesn't have the problem, because those payloads never contain a query
-string. A dedicated adapter that does this (`clicksend-opentelemetry`) is planned but not released.
+**Structured logs.** For `key=value` or JSON logs, subscribe to both events and keep the fields you
+want:
 
-A `Clicksend::Client` is frozen after construction and holds no mutable state. Share one client
-across threads, Puma workers and Sidekiq jobs. Loggers and instrumenters are called on the calling
-thread and must be thread-safe.
+```ruby
+ActiveSupport::Notifications.subscribe(/\.clicksend\z/) do |event|
+  p = event.payload
+  fields = {event: event.name, operation: p[:operation], method: p[:http_method], path: p[:path],
+            status: p[:http_status], code: p[:response_code], attempts: p[:attempts], ambiguous: p[:ambiguous],
+            attempt: p[:attempt], delay: p[:delay], error: p[:error_class] || p.dig(:exception, 0),
+            duration_ms: event.duration.round(1)}.compact
+  Rails.logger.info(fields.map { |key, value| "#{key}=#{value}" }.join(" "))
+end
+# event=request.clicksend operation=sms.deliver method=post path=/v3/sms/send status=200 code=SUCCESS attempts=1 ambiguous=false duration_ms=184.2
+# event=request.clicksend operation=sms.deliver method=post path=/v3/sms/send attempts=1 ambiguous=true error=Clicksend::TimeoutError duration_ms=15001.7
+```
 
-The default Net::HTTP adapter opens a connection per request, which costs a TCP and TLS handshake
-each time. For high volumes, the `faraday-net_http_persistent` gem reuses connections:
+**Metrics.** Label by `operation` and an outcome, **never by `path`**: paths such as
+`/v3/sms/receipts/{message_id}` contain IDs, so every message would create new series.
+
+```ruby
+ActiveSupport::Notifications.subscribe("request.clicksend") do |event|
+  p = event.payload
+  outcome = if p[:ambiguous] then "ambiguous" # may have been processed: reconcile
+  elsif p[:exception] then "error"
+  else "ok" # MessageRejected is raised after this event, where you call deliver
+  end
+  tags = {operation: p[:operation] || "other", outcome: outcome}
+
+  StatsD.distribution("clicksend.request.duration", event.duration, tags: tags)  # statsd-instrument, milliseconds
+  # prometheus-client: REQUEST_SECONDS.observe(event.duration / 1000.0, labels: tags)
+  # Yabeda:            Yabeda.clicksend.request_duration.measure(tags, event.duration / 1000.0)
+end
+```
+
+Alert on `outcome=ambiguous` (each one is a send to reconcile) and on `retry.clicksend` events whose
+`error_class` is `Clicksend::RateLimitError`.
+
+**Rails 8.1 structured events.** The events plug into `Rails.event` through a
+`StructuredEventSubscriber` (`retry` is a legal method name):
+
+```ruby
+# config/initializers/clicksend.rb
+class ClicksendEvents < ActiveSupport::StructuredEventSubscriber
+  def request(event)
+    emit_event("clicksend.request", event.payload.slice(:operation, :http_status, :response_code, :attempts, :ambiguous)
+      .merge(duration_ms: event.duration.round(2)))
+  end
+
+  def retry(event)
+    emit_event("clicksend.retry", event.payload.slice(:operation, :attempt, :delay, :error_class, :http_status))
+  end
+end
+ClicksendEvents.attach_to :clicksend
+```
+
+**OpenTelemetry.** Generic HTTP instrumentation works below this gem and records the request URL
+with its query string, which this gem keeps out of its own logs, errors and events. For
+`sms.history(to:)` and `sms.search_history`, that is the recipient's phone number. With
+`opentelemetry-instrumentation-faraday` 0.33.0 the span (named just `GET`) recorded
+`url.full=https://rest.clicksend.com/v3/sms/history?order_by=date%3Aasc&q=to%3A%2B61411111111`;
+`opentelemetry-instrumentation-net_http` 0.29.1 records the same query as `url.query`. Both also
+send a `traceparent` header to ClickSend. With those versions:
+- the Net::HTTP instrumentation skips ClickSend with `untraced_hosts: ["rest.clicksend.com"]`;
+- the Faraday instrumentation has no such option. Don't enable it, or wrap ClickSend calls in
+  `OpenTelemetry::Common::Utilities.untraced { ... }`, which suppresses every span inside the block.
+
+For ClickSend spans without that problem, use
+[`clicksend-opentelemetry`](companions/clicksend-opentelemetry): one span per call, with retries
+as events and ambiguity as an attribute, and never a query string, body or phone number. It is
+available in this repository and released separately from this gem, on its own version line; it
+is not on RubyGems yet.
+
+**Thread safety.** A `Clicksend::Client` is frozen after construction and holds no mutable state.
+Share one client across threads, Puma workers and Sidekiq jobs. Loggers and instrumenters are
+called on the calling thread and must be thread-safe.
+
+**Persistent connections.** The default Net::HTTP adapter opens a connection per request, which
+costs a TCP and TLS handshake each time. The `faraday-net_http_persistent` gem reuses connections.
+In a local benchmark (a loopback TLS server adding a simulated 25 ms round trip; ClickSend's own
+latency wasn't measured), the median send took 31 ms instead of 84 ms, and 8 threads used one
+connection each instead of one per request.
 
 ```ruby
 threads = ENV.fetch("RAILS_MAX_THREADS", 5).to_i # every thread that shares this client
@@ -674,12 +902,13 @@ CLICKSEND = Clicksend::Client.new(adapter: [:net_http_persistent, {pool_size: th
 ```
 
 The pool must be **at least as large as the number of threads sharing the client** (Puma's
-threads, Sidekiq's concurrency). A thread that can't get a connection in time fails with a
-timeout, and the gem can't tell that nothing was sent, so a send fails as ambiguous. With this
-adapter, a refused connection or connect timeout is also reported as possibly sent. Neither case
-sends anything twice, but both can leave a message unsent that the default adapter would have
-retried. Build the client once (`with` creates a new pool), and note that this adapter isn't part
-of this gem's test suite.
+threads, Sidekiq's concurrency). A thread that can't get a connection in time fails with a timeout,
+and a send that fails that way may be reported as ambiguous although nothing was sent: in the same
+local benchmark, 31 of 400 sends from 8 threads sharing `pool_size: 2` failed this way. With this adapter,
+a refused connection or connect timeout may also be reported as possibly sent. None of these sends
+anything twice, but each can leave a message unsent that the default adapter would have retried,
+and gives you a send to reconcile. Build the client once (`with` creates a new pool), and note that
+this adapter isn't part of this gem's test suite.
 
 ## Testing your application
 

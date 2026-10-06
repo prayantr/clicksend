@@ -1,0 +1,16 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+gem "clicksend", path: "../.."
+
+group :development, :test do
+  gem "rspec", "~> 3.13"
+  gem "opentelemetry-sdk", "~> 1.5"
+  # To show how this gem's span nests with HTTP-level instrumentation.
+  gem "opentelemetry-instrumentation-faraday", "~> 0.33"
+  gem "opentelemetry-instrumentation-net_http", "~> 0.29"
+  gem "activesupport", ">= 7.1"
+end

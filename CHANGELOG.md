@@ -56,6 +56,31 @@ Planned as 1.2.0. Additive.
   log filtering, voice/email/fax receipts sharing the format, inbound MMS links, and the
   dashboard's "Add Test Reply".
 
+### Documentation
+
+- **Background jobs rewritten from new measurements** (ActiveJob 8.1.4, Sidekiq 8.1.7 and
+  ActiveRecord 8.1.4 against local stand-ins for ClickSend). The 1.1 recipe stops framework
+  retries from repeating an ambiguous send, but a real Sidekiq process stopped mid-send re-ran the
+  job and sent the message twice with the default 30s read timeout (once with a 1s timeout). The
+  README now covers: a timeout budget for job clients (one attempt must end inside the runner's
+  shutdown timeout; Sidekiq's default is 25s); the `retry_on`/`discard_on` declaration order (the
+  same two lines in the wrong order sent twice); stacked retry layers (`retry_on` re-raises when
+  exhausted and the backend retries again); an in-flight marker committed on the application's own
+  row before `deliver` (claiming inside the send's own transaction still sent twice); a
+  reconciliation job built on `sms.search_history` that never resends on "not found"; and a
+  Sidekiq recipe with `sidekiq_retry_in` returning `:kill`.
+- Observability recipes: `key=value` logs, metrics labelled by `operation` (never by `path`, which
+  can hold message IDs), and a Rails 8.1 `Rails.event` bridge. The OpenTelemetry warning now names
+  what the stock Faraday and Net::HTTP instrumentations record (the query string, with the
+  recipient's number from `sms.history(to:)`) and how to exclude ClickSend from them.
+- Persistent connections: the measured benefit (local benchmark) and its costs, without
+  promising how pre-send failures are classified.
+- The companion gem `clicksend-opentelemetry` 0.1.0, in `companions/clicksend-opentelemetry`, is
+  versioned and released separately and is not yet on RubyGems: one OpenTelemetry span per
+  ClickSend call, built on the `instrumenter:` hook, with no query strings, bodies or phone
+  numbers. It changes nothing in this gem, which still depends on Faraday only. See its own
+  [CHANGELOG](companions/clicksend-opentelemetry/CHANGELOG.md).
+
 ### Development
 
 - Webhook replay fixtures (`spec/fixtures/webhooks`, one per published push shape, replayed
