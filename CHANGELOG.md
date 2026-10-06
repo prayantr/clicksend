@@ -59,10 +59,11 @@ notice, such as `Marshal.dump(client)` now raising and stricter `Retry-After` pa
   now treated the same for `StandardError` and `ScriptError`: the request's own result or error
   wins, and a custom transport's `ScriptError` is an ambiguous `ConnectionError` for a send.
   `Interrupt`, `SystemExit` and `NoMemoryError` still propagate.
-- **`Clicksend::Client` refuses `Marshal.dump`** (`TypeError`), including inside another object
-  such as `client.sms`. A client holds the API key, which `Marshal` used to write out in clear
-  (e.g. into a cache or a job payload). Build a new client instead. Responses and errors can still
-  be marshaled.
+- **`Clicksend::Client` refuses `Marshal.dump` and `YAML.dump`** (`TypeError`), including inside
+  another object such as `client.sms`. A client holds the API key, which both used to write out in
+  clear (e.g. into a cache or a job payload). Build a new client instead. Responses and errors can
+  still be serialized. Other serializers that walk instance variables (e.g. ActiveSupport's
+  `Object#as_json`) are not covered: pass job arguments, not clients.
 - **A retry delay too long to sleep no longer raises `RangeError`.** With
   `RetryPolicy.new(max_retry_after: Float::INFINITY)`, a `Retry-After: 99999999999999999999` made
   `Kernel.sleep` raise `RangeError` instead of the `RateLimitError`. A delay over 2**31 - 1 seconds

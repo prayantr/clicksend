@@ -45,8 +45,9 @@ the repository's GitHub `live` environment secrets.
 Releases are published to RubyGems by the **Release** workflow using Trusted Publishing (OIDC).
 No RubyGems API key is stored anywhere.
 
-1. In a pull request, bump `lib/clicksend/version.rb`, refresh `Gemfile.lock`, and date the
-   `CHANGELOG.md` entry. Merge it into `master` once CI and Contract are green.
+1. In a pull request, bump `lib/clicksend/version.rb`, refresh `Gemfile.lock` and
+   `companions/clicksend-opentelemetry/Gemfile.lock` (`bundle lock` in each directory; a spec
+   fails if either still records the old version), and date the `CHANGELOG.md` entry. Merge it into `master` once CI and Contract are green.
 2. Create an annotated tag on that `master` commit:
    ```sh
    git tag -a vX.Y.Z -m "clicksend X.Y.Z" <master-commit-sha>

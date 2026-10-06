@@ -177,10 +177,14 @@ module Clicksend
 
     # A client holds the API key (in its settings and its Authorization
     # header), so it must never be written to a cache, a job queue or a
-    # session by Marshal. Marshal checks #marshal_dump first, for frozen
-    # objects too.
+    # session by Marshal or YAML. Marshal checks #marshal_dump first, for
+    # frozen objects too; Psych checks #encode_with.
     def marshal_dump
       raise TypeError, "#{self.class.name} contains credentials and can't be marshaled; build a new client instead"
+    end
+
+    def encode_with(_coder)
+      raise TypeError, "#{self.class.name} contains credentials and can't be serialized to YAML; build a new client instead"
     end
 
     private
