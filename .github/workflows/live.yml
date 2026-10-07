@@ -1,7 +1,8 @@
 # Optional checks against the real ClickSend API. Manual only; never part of
 # normal CI. Credentials come from the "live" environment's secrets
 # (CLICKSEND_USERNAME, CLICKSEND_API_KEY), never from the repository. Sends
-# go only to ClickSend's documented, free test number.
+# go only to ClickSend's documented, free test number. Its actions are pinned
+# to commit SHAs (Dependabot keeps them current), as it can hold credentials.
 name: Live API
 
 on:
@@ -15,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: live
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
         with:
           ruby-version: "4.0"
           bundler-cache: true

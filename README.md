@@ -97,7 +97,7 @@ gem install clicksend
 
 ```ruby
 # Gemfile
-gem "clicksend", "~> 1.0"
+gem "clicksend", "~> 1.2"
 ```
 
 The only runtime dependency is [Faraday](https://github.com/lostisland/faraday) 2.x.
