@@ -99,6 +99,8 @@ jobs:
           bundler-cache: true
       - run: bundle exec standardrb
 
+  # Every lockfile CI installs from: the core's, and the companion's two (current core, and
+  # clicksend 1.1.0 for the oldest-core job). The first step updates the advisory database.
   audit:
     runs-on: ubuntu-latest
     steps:
@@ -109,7 +111,12 @@ jobs:
         with:
           ruby-version: "4.0"
           bundler-cache: true
-      - run: bundle exec bundle-audit check --update
+      - name: Audit Gemfile.lock (clicksend)
+        run: bundle exec bundle-audit check --update
+      - name: Audit clicksend-opentelemetry Gemfile.lock (current core)
+        run: bundle exec bundle-audit check companions/clicksend-opentelemetry --gemfile-lock Gemfile.lock --no-update
+      - name: Audit clicksend-opentelemetry gemfiles/clicksend-1.1.gemfile.lock (oldest supported core)
+        run: bundle exec bundle-audit check companions/clicksend-opentelemetry --gemfile-lock gemfiles/clicksend-1.1.gemfile.lock --no-update
 
   build:
     runs-on: ubuntu-latest
