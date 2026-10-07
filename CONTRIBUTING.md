@@ -47,7 +47,8 @@ No RubyGems API key is stored anywhere.
 
 1. In a pull request, bump `lib/clicksend/version.rb`, refresh `Gemfile.lock` and
    `companions/clicksend-opentelemetry/Gemfile.lock` (`bundle lock` in each directory; a spec
-   fails if either still records the old version), and date the `CHANGELOG.md` entry. Merge it into `master` once CI and Contract are green.
+   fails if either still records the old version), and date the `CHANGELOG.md` entry. Merge it
+   into `master` once CI and Contract are green.
 2. Create an annotated tag on that `master` commit:
    ```sh
    git tag -a vX.Y.Z -m "clicksend X.Y.Z" <master-commit-sha>
@@ -66,3 +67,28 @@ No RubyGems API key is stored anywhere.
    Publishing.
 6. The workflow does not create or push the tag. Bundler's `rake release` finds the existing
    tag and skips tagging.
+
+`master` only changes through pull requests, and the CI checks must pass first. Release tags
+(`v*` and `clicksend-opentelemetry-v*`) can be created but never moved or deleted, so a tag on
+the wrong commit means releasing a new version, not retagging.
+
+### clicksend-opentelemetry
+
+The companion gem in `companions/clicksend-opentelemetry` is released the same way, on its own
+version line, by the **Release clicksend-opentelemetry** workflow and the
+`rubygems-clicksend-opentelemetry` environment, which only accepts runs from
+`clicksend-opentelemetry-v*` tags:
+
+1. In a pull request, bump `companions/clicksend-opentelemetry/lib/clicksend/opentelemetry/version.rb`,
+   refresh its `Gemfile.lock`, and date its `CHANGELOG.md` entry. Merge it once CI is green.
+2. Tag that `master` commit and push only the tag:
+   ```sh
+   git tag -a clicksend-opentelemetry-vX.Y.Z -m "clicksend-opentelemetry X.Y.Z" <master-commit-sha>
+   git push origin refs/tags/clicksend-opentelemetry-vX.Y.Z
+   ```
+3. Run the workflow from the tag:
+   ```sh
+   gh workflow run release-clicksend-opentelemetry.yml --ref clicksend-opentelemetry-vX.Y.Z
+   ```
+
+Its GitHub release should not be marked "latest", which belongs to `clicksend`.

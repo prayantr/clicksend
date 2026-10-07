@@ -3,8 +3,8 @@
 How this gem interprets ClickSend's REST v3 documentation, where that documentation is
 ambiguous, and what the live API actually did. Last reviewed 2026-10-06: the documentation
 review covered all 34 OpenAPI sections, and the live runs on 2026-10-05 and 2026-10-06 (see
-"Live verification") covered sending and read-only history and rate-limit checks, but no
-delivery receipt.
+"Live verification") covered sending, read-only history and rate-limit checks, and a free
+`sms.cancel` check, but no delivery receipt and no successful cancel.
 
 Sources:
 - [API reference](https://developers.clicksend.com/docs/), with its OpenAPI files at
@@ -200,8 +200,9 @@ test accounts:
 - [ ] ClickSend's current retry schedule and timeout for pushes
 - [ ] How soon a sent message appears in history, and whether `date_from`/`date_to` are inclusive
 - [ ] Where and when `THROTTLED` is returned
-- [ ] What `PUT /v3/sms/{message_id}/cancel` answers for a second cancel, an already-sent message
-      and an unknown ID (protocol in `research/1.2-api-cancel-quote-history.md`)
+- [x] What `PUT /v3/sms/{message_id}/cancel` answers for a second cancel, an already-sent message
+      and an unknown ID: 404 `NOT_FOUND` for all three, observed with test-number messages only (see
+      "`sms.cancel` check"). A successful cancel is still unobserved (above)
 - [ ] Whether `POST /v3/sms/price` changes anything: balance, history, `THROTTLED`, rate limits
 - [ ] Whether history's `q=to:` matches exactly or by substring
 - [ ] Rate limits for endpoints other than `GET /v3/account`

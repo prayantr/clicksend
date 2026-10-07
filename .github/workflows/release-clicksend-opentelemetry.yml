@@ -5,7 +5,7 @@
 # The trusted publisher on rubygems.org names this repository, this workflow
 # file and that environment.
 #
-# Release process (see companions/clicksend-opentelemetry/CHANGELOG.md): merge
+# Release process (see CONTRIBUTING.md, "clicksend-opentelemetry"): merge
 # the version bump into master, push an annotated
 # clicksend-opentelemetry-vX.Y.Z tag on that commit, then run this workflow from
 # the tag. The companion's Rakefile uses that tag prefix, so `rake release`
