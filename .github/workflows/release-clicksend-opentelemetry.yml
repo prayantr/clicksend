@@ -11,6 +11,11 @@
 # the tag. The companion's Rakefile uses that tag prefix, so `rake release`
 # finds the existing tag, skips tagging and only builds and pushes the gem. This
 # workflow never creates or pushes tags.
+#
+# These workflows hold the RubyGems publishing credential, so every action is
+# pinned to a commit SHA (version in the trailing comment). To update one,
+# pin the commit of the new release tag, e.g.
+#   gh api repos/OWNER/REPO/commits/vX.Y.Z --jq .sha
 name: Release clicksend-opentelemetry
 
 on:
@@ -21,19 +26,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: rubygems-clicksend-opentelemetry
     permissions:
-      contents: read
-      id-token: write
+      contents: read # never pushes: the tag already exists
+      id-token: write # Trusted Publishing
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
           working-directory: companions/clicksend-opentelemetry
       - run: bundle exec rspec
         working-directory: companions/clicksend-opentelemetry
-      - uses: rubygems/release-gem@v1
+      - uses: rubygems/release-gem@7f9650160c1a4e7989fdc9855807bdbd421d8b6b # v1.4.1
         with:
           working-directory: companions/clicksend-opentelemetry
