@@ -42,6 +42,8 @@ the repository's GitHub `live` environment secrets.
 
 ## Releasing (maintainers)
 
+The current project state, settled decisions and known limitations are in [`HANDOFF.md`](HANDOFF.md).
+
 Releases are published to RubyGems by the **Release** workflow using Trusted Publishing (OIDC).
 No RubyGems API key is stored anywhere.
 
